@@ -33,6 +33,7 @@ export default function Home() {
   const [selectedWords, setSelectedWords] = useState<Set<string>>(new Set());
   const [cartOpen, setCartOpen] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   // ── Toast helpers ──
@@ -87,7 +88,6 @@ export default function Home() {
           addToast("error", "Cannot flag this word.");
           return;
         }
-        // Flags are processed immediately (no cart), but still through confirm flow
         handleFlagWord(wordId);
       }
     },
@@ -129,7 +129,7 @@ export default function Home() {
     [cart, addToast]
   );
 
-  // ── Checkout ──
+  // ── Checkout: creates PaymentIntent and shows payment form ──
   const handleCheckout = useCallback(async () => {
     if (!cart.meetsMinimum) return;
 
@@ -150,28 +150,46 @@ export default function Home() {
         return;
       }
 
-      const { paymentIntentId } = await response.json();
-
-      // TODO: Integrate Stripe.js for actual card payment here
-      // For now, show success toast
-      addToast(
-        "success",
-        `Checkout created (${paymentIntentId}). Stripe payment UI coming soon.`
-      );
-
-      cart.clearCart();
-      setCartOpen(false);
-      setSelectedWords(new Set());
-      setActiveMode(null);
-
-      // Refresh story after checkout
-      setTimeout(() => story.refresh(), 2000);
+      const data = await response.json();
+      // Show the Stripe payment form with the clientSecret
+      setClientSecret(data.clientSecret);
     } catch {
       addToast("error", "Checkout failed. Please try again.");
     } finally {
       setIsCheckingOut(false);
     }
+  }, [cart, addToast]);
+
+  // ── Payment success: card charged, webhook will process actions ──
+  const handlePaymentSuccess = useCallback(() => {
+    addToast("success", "Payment successful! Your edit will appear shortly.");
+    setClientSecret(null);
+    cart.clearCart();
+    setCartOpen(false);
+    setSelectedWords(new Set());
+    setActiveMode(null);
+
+    // Poll for story update (webhook processes asynchronously)
+    const pollInterval = setInterval(() => {
+      story.refresh();
+    }, 2000);
+
+    // Stop polling after 15 seconds
+    setTimeout(() => clearInterval(pollInterval), 15000);
   }, [cart, addToast, story]);
+
+  // ── Payment error ──
+  const handlePaymentError = useCallback(
+    (message: string) => {
+      addToast("error", message);
+    },
+    [addToast]
+  );
+
+  // ── Payment cancel: go back to cart review ──
+  const handlePaymentCancel = useCallback(() => {
+    setClientSecret(null);
+  }, []);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -206,6 +224,10 @@ export default function Home() {
         onRemoveAction={cart.removeAction}
         onCheckout={handleCheckout}
         isCheckingOut={isCheckingOut}
+        clientSecret={clientSecret}
+        onPaymentSuccess={handlePaymentSuccess}
+        onPaymentError={handlePaymentError}
+        onPaymentCancel={handlePaymentCancel}
       />
 
       <Toast toasts={toasts} onDismiss={dismissToast} />
