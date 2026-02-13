@@ -2,15 +2,39 @@
  * Sidebar component — closable philosophy blurbs and pricing info.
  * Positioned as an absolute overlay so it never shifts the paper.
  * Each box has an X button to dismiss it.
+ * Dismissals persist in sessionStorage (survives refresh, clears on browser close).
  *
  * Inputs: None
  * Outputs: Rendered sidebar overlay
- * Side Effects: Local state for dismissed boxes
+ * Side Effects: Reads/writes sessionStorage for dismissed state
  */
 
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, useEffect } from "react";
+
+const STORAGE_KEY = "redacted_sidebar_dismissed";
+
+/** Load dismissed set from sessionStorage. */
+function loadDismissed(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const stored = sessionStorage.getItem(STORAGE_KEY);
+    if (stored) return new Set(JSON.parse(stored));
+  } catch {
+    // Ignore parse errors
+  }
+  return new Set();
+}
+
+/** Save dismissed set to sessionStorage. */
+function saveDismissed(dismissed: Set<string>): void {
+  try {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify([...dismissed]));
+  } catch {
+    // Ignore storage errors
+  }
+}
 
 interface SidebarBoxProps {
   readonly id: string;
@@ -39,9 +63,18 @@ function SidebarBox({ id, children, dismissed, onDismiss }: SidebarBoxProps) {
 export default function Sidebar() {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
-  const handleDismiss = (id: string) => {
-    setDismissed((prev) => new Set(prev).add(id));
-  };
+  // Hydrate from sessionStorage on mount
+  useEffect(() => {
+    setDismissed(loadDismissed());
+  }, []);
+
+  const handleDismiss = useCallback((id: string) => {
+    setDismissed((prev) => {
+      const next = new Set(prev).add(id);
+      saveDismissed(next);
+      return next;
+    });
+  }, []);
 
   // If all boxes are dismissed, hide entirely
   const allDismissed = dismissed.size >= 4;

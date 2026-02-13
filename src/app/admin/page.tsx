@@ -3,11 +3,13 @@
  *
  * Accessed via URL: /admin
  * Authenticates with secret token via the admin API (sent as x-admin-token header).
- * Shows all words with ability to write (free), flag, redact, uncover, and nuclear remove.
+ * All tools are unbound: write (free, no char restrictions), flag/unflag (no dupe check),
+ * redact (user-undoable), admin redact (permanent), uncover, nuclear remove (with confirm),
+ * restore (reverse nuclear remove).
  *
  * Inputs: None
  * Outputs: Full admin moderation interface
- * Side Effects: API calls to /api/admin, /api/words, /api/flag
+ * Side Effects: API calls to /api/admin, /api/words
  */
 
 "use client";
@@ -24,7 +26,15 @@ interface AdminWord {
 }
 
 /** Must match AdminActionType enum from lib/types.ts */
-type AdminAction = "write" | "redact" | "uncover" | "nuclear_remove";
+type AdminAction =
+  | "write"
+  | "redact"
+  | "admin_redact"
+  | "uncover"
+  | "nuclear_remove"
+  | "restore"
+  | "flag"
+  | "unflag";
 
 export default function AdminPage() {
   const [token, setToken] = useState("");
@@ -103,7 +113,21 @@ export default function AdminPage() {
     [token, fetchWords, logAction]
   );
 
-  /** Admin write — free, bypasses payment. */
+  /** Nuclear remove with confirmation prompt. */
+  const handleNuclearRemove = useCallback(
+    (wordId: string, wordContent: string | null) => {
+      const display = wordContent ?? "[hidden]";
+      const confirmed = window.confirm(
+        `Are you sure you want to NUCLEAR REMOVE "${display}"?\n\nThis will replace the word with glitch art. You can restore it later.`
+      );
+      if (confirmed) {
+        performAction("nuclear_remove", wordId);
+      }
+    },
+    [performAction]
+  );
+
+  /** Admin write — free, no character restrictions. */
   const handleAdminWrite = useCallback(async () => {
     const word = writeInput.trim();
     if (!word) return;
@@ -113,31 +137,6 @@ export default function AdminPage() {
     setWriteInput("");
     setWriting(false);
   }, [writeInput, performAction]);
-
-  /** Admin flag — direct flag (no fingerprint/duplicate check). */
-  const handleAdminFlag = useCallback(
-    async (wordId: string) => {
-      try {
-        const res = await fetch("/api/flag", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wordId, visitorId: `admin-${token.slice(0, 8)}` }),
-        });
-
-        const data = await res.json();
-
-        if (!res.ok) {
-          logAction(`❌ flag #${wordId.slice(0, 8)}… — ${data.error ?? res.status}`);
-        } else {
-          logAction(`✅ flag #${wordId.slice(0, 8)}… — flagged`);
-          fetchWords();
-        }
-      } catch {
-        logAction(`❌ flag failed — network error`);
-      }
-    },
-    [token, fetchWords, logAction]
-  );
 
   // ── Login screen ──
   if (!authenticated) {
@@ -195,7 +194,14 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* Admin write tool — unbound, free */}
+        {/* Legend */}
+        <div className="mb-4 flex flex-wrap gap-3 text-[10px] text-neutral-500">
+          <span>██ = Redact (users can pay to uncover)</span>
+          <span>🔒 = Admin Lock (permanent, only admin can undo)</span>
+          <span>☢ = Nuclear Remove (glitch art, admin can restore)</span>
+        </div>
+
+        {/* Admin write tool — unbound, free, no char restrictions */}
         <div className="mb-6 flex items-center gap-2 px-4 py-3 bg-neutral-900 rounded-lg border border-amber-900/40">
           <span className="text-amber-500 text-sm font-medium shrink-0">Write:</span>
           <input
@@ -203,12 +209,12 @@ export default function AdminPage() {
             value={writeInput}
             onChange={(e) => setWriteInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleAdminWrite()}
-            placeholder="Type a word to add..."
-            maxLength={20}
+            placeholder="Type anything — no restrictions..."
+            maxLength={100}
             className="flex-1 bg-transparent text-white text-sm outline-none placeholder:text-neutral-500"
           />
           <span className="text-neutral-600 text-xs font-mono shrink-0">
-            {writeInput.length}/20
+            {writeInput.length}/100
           </span>
           <button
             onClick={handleAdminWrite}
@@ -240,7 +246,7 @@ export default function AdminPage() {
                   {/* Content */}
                   <span
                     className={`flex-1 text-sm font-serif ${
-                      word.status === "redacted"
+                      word.status === "redacted" || word.status === "admin_redacted"
                         ? "text-neutral-600 line-through"
                         : word.status === "admin_removed"
                         ? "text-red-500 line-through"
@@ -261,10 +267,12 @@ export default function AdminPage() {
                         ? "bg-amber-950 text-amber-400"
                         : word.status === "redacted"
                         ? "bg-neutral-800 text-neutral-400"
+                        : word.status === "admin_redacted"
+                        ? "bg-purple-950 text-purple-400"
                         : "bg-red-950 text-red-400"
                     }`}
                   >
-                    {word.status}
+                    {word.status === "admin_redacted" ? "🔒 locked" : word.status}
                   </span>
 
                   {/* Flag count */}
@@ -274,30 +282,54 @@ export default function AdminPage() {
                     </span>
                   )}
 
-                  {/* Action buttons — all tools, unbound */}
+                  {/* Action buttons — all tools, fully unbound */}
                   <div className="flex gap-1 shrink-0">
-                    {/* Flag */}
-                    {(word.status === "visible" || word.status === "flagged") && (
-                      <button
-                        onClick={() => handleAdminFlag(word.id)}
-                        className="px-2 py-0.5 bg-neutral-800 hover:bg-amber-900 text-neutral-400 hover:text-amber-300 text-xs rounded transition-colors"
-                        title="Flag"
-                      >
-                        🚩
-                      </button>
+                    {/* Flag + / Unflag - */}
+                    {word.status !== "admin_removed" && word.status !== "admin_redacted" && (
+                      <>
+                        <button
+                          onClick={() => performAction("flag", word.id)}
+                          className="px-2 py-0.5 bg-neutral-800 hover:bg-amber-900 text-neutral-400 hover:text-amber-300 text-xs rounded transition-colors"
+                          title="Add flag"
+                        >
+                          🚩+
+                        </button>
+                        {word.flag_count > 0 && (
+                          <button
+                            onClick={() => performAction("unflag", word.id)}
+                            className="px-2 py-0.5 bg-neutral-800 hover:bg-green-900 text-neutral-400 hover:text-green-300 text-xs rounded transition-colors"
+                            title="Remove flag"
+                          >
+                            🚩−
+                          </button>
+                        )}
+                      </>
                     )}
-                    {/* Redact */}
-                    {word.status !== "redacted" && word.status !== "admin_removed" && (
+
+                    {/* Redact (user-undoable) */}
+                    {(word.status === "visible" || word.status === "flagged") && (
                       <button
                         onClick={() => performAction("redact", word.id)}
                         className="px-2 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white text-xs rounded transition-colors"
-                        title="Redact"
+                        title="Redact (users can pay to uncover)"
                       >
                         ██
                       </button>
                     )}
-                    {/* Uncover */}
-                    {word.status === "redacted" && (
+
+                    {/* Admin Lock (permanent redaction, only admin can undo) */}
+                    {(word.status === "visible" || word.status === "flagged" || word.status === "redacted") && (
+                      <button
+                        onClick={() => performAction("admin_redact", word.id)}
+                        className="px-2 py-0.5 bg-neutral-800 hover:bg-purple-900 text-neutral-400 hover:text-purple-300 text-xs rounded transition-colors"
+                        title="Admin Lock — permanent redact, only admin can undo"
+                      >
+                        🔒
+                      </button>
+                    )}
+
+                    {/* Uncover (works on both redacted and admin_redacted for admin) */}
+                    {(word.status === "redacted" || word.status === "admin_redacted") && (
                       <button
                         onClick={() => performAction("uncover", word.id)}
                         className="px-2 py-0.5 bg-neutral-800 hover:bg-blue-900 text-neutral-400 hover:text-blue-300 text-xs rounded transition-colors"
@@ -306,14 +338,26 @@ export default function AdminPage() {
                         👁
                       </button>
                     )}
-                    {/* Nuclear remove */}
+
+                    {/* Nuclear remove — with confirmation */}
                     {word.status !== "admin_removed" && (
                       <button
-                        onClick={() => performAction("nuclear_remove", word.id)}
+                        onClick={() => handleNuclearRemove(word.id, word.content)}
                         className="px-2 py-0.5 bg-neutral-800 hover:bg-red-900 text-neutral-400 hover:text-red-300 text-xs rounded transition-colors"
-                        title="Nuclear remove"
+                        title="Nuclear remove (glitch art)"
                       >
                         ☢
+                      </button>
+                    )}
+
+                    {/* Restore — reverse a nuclear remove */}
+                    {word.status === "admin_removed" && (
+                      <button
+                        onClick={() => performAction("restore", word.id)}
+                        className="px-2 py-0.5 bg-neutral-800 hover:bg-emerald-900 text-neutral-400 hover:text-emerald-300 text-xs rounded transition-colors"
+                        title="Restore to visible"
+                      >
+                        ♻
                       </button>
                     )}
                   </div>

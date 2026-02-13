@@ -23,6 +23,7 @@ import { v4 as uuidv4 } from "uuid";
 function toApiResponse(row: WordRecord): ApiWordResponse {
   const isHidden =
     row.status === WordStatus.Redacted ||
+    row.status === WordStatus.AdminRedacted ||
     row.status === WordStatus.AdminRemoved;
 
   return {
@@ -185,7 +186,33 @@ export async function uncoverWord(wordId: string): Promise<boolean> {
   );
 
   if (!word) return false;
+  // Regular users can only uncover user-redacted words, NOT admin-locked ones
   if (word.status !== WordStatus.Redacted) return false;
+
+  await query(
+    `UPDATE words SET status = $1, flag_count = 0 WHERE id = $2`,
+    [WordStatus.Visible, wordId]
+  );
+  return true;
+}
+
+/**
+ * Admin uncover — works on both 'redacted' and 'admin_redacted' words.
+ * This is the only way to reverse an admin-locked redaction.
+ */
+export async function adminUncoverWord(wordId: string): Promise<boolean> {
+  const word = await queryOne<WordRecord>(
+    `SELECT * FROM words WHERE id = $1`,
+    [wordId]
+  );
+
+  if (!word) return false;
+  if (
+    word.status !== WordStatus.Redacted &&
+    word.status !== WordStatus.AdminRedacted
+  ) {
+    return false;
+  }
 
   await query(
     `UPDATE words SET status = $1, flag_count = 0 WHERE id = $2`,
@@ -224,6 +251,85 @@ export async function adminWriteWord(content: string): Promise<string> {
     [id, content, WordStatus.Visible]
   );
   return id;
+}
+
+/**
+ * Admin: force-add a flag to a word, bypassing duplicate/rate-limit checks.
+ * Sets status to 'flagged' if currently 'visible'.
+ */
+export async function adminFlagWord(wordId: string): Promise<boolean> {
+  const word = await queryOne<WordRecord>(
+    `SELECT * FROM words WHERE id = $1`,
+    [wordId]
+  );
+  if (!word) return false;
+
+  const newStatus =
+    word.status === WordStatus.Visible ? WordStatus.Flagged : word.status;
+
+  await query(
+    `UPDATE words
+     SET flag_count = LEAST(flag_count + 1, $1), status = $2
+     WHERE id = $3`,
+    [VALIDATION.MAX_FLAG_COUNT, newStatus, wordId]
+  );
+  return true;
+}
+
+/**
+ * Admin: remove a flag from a word. Resets status to 'visible' if flag_count reaches 0.
+ */
+export async function adminUnflagWord(wordId: string): Promise<boolean> {
+  const word = await queryOne<WordRecord>(
+    `SELECT * FROM words WHERE id = $1`,
+    [wordId]
+  );
+  if (!word || word.flag_count <= 0) return false;
+
+  const newFlagCount = word.flag_count - 1;
+  const newStatus = newFlagCount === 0 ? WordStatus.Visible : word.status;
+
+  await query(
+    `UPDATE words SET flag_count = $1, status = $2 WHERE id = $3`,
+    [newFlagCount, newStatus, wordId]
+  );
+  return true;
+}
+
+/**
+ * Admin: permanent redaction — shows as a normal black bar but cannot be
+ * uncovered by regular users paying for an uncover action.
+ */
+export async function adminRedactWord(wordId: string): Promise<boolean> {
+  const word = await queryOne<WordRecord>(
+    `SELECT * FROM words WHERE id = $1`,
+    [wordId]
+  );
+  if (!word) return false;
+
+  await query(
+    `UPDATE words SET status = $1, flag_count = 0 WHERE id = $2`,
+    [WordStatus.AdminRedacted, wordId]
+  );
+  return true;
+}
+
+/**
+ * Admin: restore a nuclear-removed word back to visible.
+ */
+export async function adminRestoreWord(wordId: string): Promise<boolean> {
+  const word = await queryOne<WordRecord>(
+    `SELECT * FROM words WHERE id = $1`,
+    [wordId]
+  );
+  if (!word) return false;
+  if (word.status !== WordStatus.AdminRemoved) return false;
+
+  await query(
+    `UPDATE words SET status = $1, flag_count = 0 WHERE id = $2`,
+    [WordStatus.Visible, wordId]
+  );
+  return true;
 }
 
 /**

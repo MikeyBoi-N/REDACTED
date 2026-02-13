@@ -35,7 +35,20 @@ export default function Home() {
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [showWriteTooltip, setShowWriteTooltip] = useState(true);
+  // Initialize as false; hydrate from sessionStorage on mount
+  const [showWriteTooltip, setShowWriteTooltip] = useState(false);
+
+  // Hydrate tooltip state from sessionStorage
+  useEffect(() => {
+    try {
+      const dismissed = sessionStorage.getItem("redacted_tooltip_dismissed");
+      if (dismissed !== "true") {
+        setShowWriteTooltip(true);
+      }
+    } catch {
+      setShowWriteTooltip(true);
+    }
+  }, []);
 
   // Ref for cart pulse animation
   const cartPulseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -285,7 +298,12 @@ export default function Home() {
         onModeChange={handleModeChange}
         onWriteSubmit={handleWriteSubmit}
         showWriteTooltip={showWriteTooltip}
-        onDismissTooltip={() => setShowWriteTooltip(false)}
+        onDismissTooltip={() => {
+          setShowWriteTooltip(false);
+          try {
+            sessionStorage.setItem("redacted_tooltip_dismissed", "true");
+          } catch { /* ignore */ }
+        }}
       />
 
       <CartPanel

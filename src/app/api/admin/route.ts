@@ -6,17 +6,20 @@
  *
  * Inputs: Admin action request body + auth headers
  * Outputs: Action result
- * Side Effects: Writes/redacts/removes words
+ * Side Effects: Writes/redacts/removes/flags/restores words
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateAdmin } from "@/lib/admin";
-import { validateWord } from "@/lib/validation";
 import {
   adminWriteWord,
   redactWord,
-  uncoverWord,
+  adminUncoverWord,
   adminRemoveWord,
+  adminFlagWord,
+  adminUnflagWord,
+  adminRedactWord,
+  adminRestoreWord,
 } from "@/lib/words";
 import { AdminActionRequest, AdminActionType } from "@/lib/types";
 
@@ -30,7 +33,6 @@ export async function POST(request: NextRequest) {
         { status: 429 }
       );
     }
-    // 404 for everything else (hides existence of admin route)
     return new NextResponse(null, { status: 404 });
   }
 
@@ -45,10 +47,9 @@ export async function POST(request: NextRequest) {
             { status: 400 }
           );
         }
-        const wordCheck = validateWord(body.wordContent);
-        if (!wordCheck.valid) {
+        if (body.wordContent.length < 1 || body.wordContent.length > 100) {
           return NextResponse.json(
-            { error: wordCheck.error },
+            { error: "Word must be 1–100 characters." },
             { status: 400 }
           );
         }
@@ -67,6 +68,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success });
       }
 
+      case AdminActionType.AdminRedact: {
+        if (!body.wordId) {
+          return NextResponse.json(
+            { error: "wordId is required for admin redact." },
+            { status: 400 }
+          );
+        }
+        const success = await adminRedactWord(body.wordId);
+        return NextResponse.json({ success });
+      }
+
       case AdminActionType.Uncover: {
         if (!body.wordId) {
           return NextResponse.json(
@@ -74,7 +86,7 @@ export async function POST(request: NextRequest) {
             { status: 400 }
           );
         }
-        const success = await uncoverWord(body.wordId);
+        const success = await adminUncoverWord(body.wordId);
         return NextResponse.json({ success });
       }
 
@@ -86,6 +98,39 @@ export async function POST(request: NextRequest) {
           );
         }
         const success = await adminRemoveWord(body.wordId);
+        return NextResponse.json({ success });
+      }
+
+      case AdminActionType.Restore: {
+        if (!body.wordId) {
+          return NextResponse.json(
+            { error: "wordId is required for restore." },
+            { status: 400 }
+          );
+        }
+        const success = await adminRestoreWord(body.wordId);
+        return NextResponse.json({ success });
+      }
+
+      case AdminActionType.Flag: {
+        if (!body.wordId) {
+          return NextResponse.json(
+            { error: "wordId is required for flag." },
+            { status: 400 }
+          );
+        }
+        const success = await adminFlagWord(body.wordId);
+        return NextResponse.json({ success });
+      }
+
+      case AdminActionType.Unflag: {
+        if (!body.wordId) {
+          return NextResponse.json(
+            { error: "wordId is required for unflag." },
+            { status: 400 }
+          );
+        }
+        const success = await adminUnflagWord(body.wordId);
         return NextResponse.json({ success });
       }
 

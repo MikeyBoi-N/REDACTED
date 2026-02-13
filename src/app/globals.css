@@ -91,6 +91,42 @@ body {
   animation: tooltip-bounce 2s ease-in-out infinite;
 }
 
+/* ── Glitch Shimmer for Nuclear-Removed Words ─────────────── */
+@keyframes glitch-shimmer {
+  0% {
+    opacity: 0.7;
+    text-shadow: 0 0 2px rgba(220, 38, 38, 0.6);
+  }
+  15% {
+    opacity: 0.3;
+    text-shadow: 1px 0 3px rgba(220, 38, 38, 0.4);
+  }
+  30% {
+    opacity: 0.9;
+    text-shadow: -1px 0 1px rgba(220, 38, 38, 0.8);
+  }
+  45% {
+    opacity: 0.2;
+    text-shadow: 0 0 0 transparent;
+  }
+  60% {
+    opacity: 0.8;
+    text-shadow: 2px 0 4px rgba(220, 38, 38, 0.5);
+  }
+  75% {
+    opacity: 0.4;
+    text-shadow: -1px 0 2px rgba(220, 38, 38, 0.3);
+  }
+  100% {
+    opacity: 0.7;
+    text-shadow: 0 0 2px rgba(220, 38, 38, 0.6);
+  }
+}
+
+.glitch-shimmer {
+  animation: glitch-shimmer 0.3s steps(1) infinite;
+}
+
 /* ── Selection Colors ─────────────────────────────────────── */
 ::selection {
   background: rgba(180, 120, 60, 0.3);

@@ -12,6 +12,7 @@ export enum WordStatus {
   Visible = "visible",
   Flagged = "flagged",
   Redacted = "redacted",
+  AdminRedacted = "admin_redacted", // Like redacted, but only admin can uncover
   AdminRemoved = "admin_removed",
 }
 
@@ -76,8 +77,12 @@ export interface ActionResult {
 export enum AdminActionType {
   Write = "write",
   Redact = "redact",
+  AdminRedact = "admin_redact", // Permanent — only admin can uncover
   Uncover = "uncover",
   NuclearRemove = "nuclear_remove",
+  Restore = "restore", // Reverse a nuclear remove
+  Flag = "flag",
+  Unflag = "unflag",
 }
 
 export interface AdminActionRequest {

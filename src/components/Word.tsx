@@ -3,16 +3,17 @@
  *
  * - visible: normal text
  * - flagged: black overlay at 80% opacity (word still 20% readable)
- * - redacted: solid black bar sized to ACTUAL word length (content_length from API)
- * - admin_removed: glitch placeholder
+ * - redacted / admin_redacted: solid black bar sized to real word length
+ * - admin_removed: glitchy animated ASCII sized to real word length
  *
  * Inputs: ApiWordResponse + interaction mode + click handler
  * Outputs: Rendered word span
- * Side Effects: None
+ * Side Effects: setInterval for glitch animation (admin_removed only)
  */
 
 "use client";
 
+import { useState, useEffect, useRef, memo } from "react";
 import { ApiWordResponse, WordStatus, VALIDATION } from "@/lib/types";
 
 interface WordProps {
@@ -22,39 +23,100 @@ interface WordProps {
   readonly onWordClick: (wordId: string) => void;
 }
 
-export default function Word({
+// ── Glitch character sets for nuclear-removed words ──
+const GLITCH_BLOCKS = "█▓▒░▪■╳╬⊞⧫◼◾▣▩▤▥▦▧▨";
+const GLITCH_FRAGMENTS = "¿¡§†‡¶∅∆∇◊∎⌀⌿⍉⍊⍋⍒⏃⏄⏅";
+const ALL_GLITCH = GLITCH_BLOCKS + GLITCH_FRAGMENTS;
+
+/** Generate a random glitch string of a given length. */
+function randomGlitch(length: number): string {
+  let result = "";
+  for (let i = 0; i < length; i++) {
+    result += ALL_GLITCH[Math.floor(Math.random() * ALL_GLITCH.length)];
+  }
+  return result;
+}
+
+/**
+ * GlitchText — rapidly cycles through random block characters.
+ * Renders at the exact character width of the original word.
+ */
+function GlitchText({ length }: { length: number }) {
+  const [text, setText] = useState(() => randomGlitch(length));
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    // Fast flashing: randomize every 80ms for chaotic feel
+    intervalRef.current = setInterval(() => {
+      setText(randomGlitch(length));
+    }, 80);
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [length]);
+
+  return (
+    <span
+      className="inline-block font-mono text-red-600/70 select-none glitch-shimmer"
+      style={{ width: `${length}ch` }}
+      aria-hidden="true"
+    >
+      {text}
+    </span>
+  );
+}
+
+const Word = memo(function Word({
   word,
   interactionMode,
   isSelected,
   onWordClick,
 }: WordProps) {
-  // ── Redacted: solid black bar sized to real word length ──
-  if (word.status === WordStatus.Redacted) {
-    const isClickable = interactionMode === "uncover";
-    // Use the real content_length from the API — no more guessing
+  // ── Redacted / Admin Redacted: solid black bar sized to real word length ──
+  if (
+    word.status === WordStatus.Redacted ||
+    word.status === WordStatus.AdminRedacted
+  ) {
+    // Only regular 'redacted' can be uncovered by users; admin_redacted is locked
+    const isClickable =
+      interactionMode === "uncover" && word.status === WordStatus.Redacted;
     const barWidth = Math.max(word.content_length, 1);
+
     return (
       <span
         className={`inline-block bg-black rounded-sm mx-0.5 align-middle ${
           isClickable ? "cursor-pointer hover:bg-neutral-700" : ""
-        } ${isSelected ? "ring-2 ring-blue-500" : ""}`}
+        } ${isSelected ? "ring-2 ring-blue-500" : ""}${
+          word.status === WordStatus.AdminRedacted
+            ? " border border-red-900/30"
+            : ""
+        }`}
         style={{ width: `${barWidth}ch`, height: "1.1em" }}
         onClick={() => isClickable && onWordClick(word.id)}
         role={isClickable ? "button" : undefined}
-        aria-label={isClickable ? "Click to uncover this redacted word" : "Redacted word"}
+        aria-label={
+          isClickable
+            ? "Click to uncover this redacted word"
+            : word.status === WordStatus.AdminRedacted
+            ? "Permanently redacted by administrator"
+            : "Redacted word"
+        }
       />
     );
   }
 
-  // ── Admin removed: glitch placeholder ──
+  // ── Admin removed: glitchy animated ASCII, sized to actual word length ──
   if (word.status === WordStatus.AdminRemoved) {
+    const charLen = Math.max(word.content_length, 1);
+
     return (
       <span
-        className="inline-block mx-0.5 align-middle bg-red-950/40 border border-red-900/30 rounded-sm overflow-hidden"
-        style={{ width: "3.5em", height: "1.2em" }}
+        className="inline-block mx-0.5 align-middle overflow-hidden rounded-sm bg-neutral-950/80"
+        style={{ height: "1.2em" }}
         aria-label="Content removed by site administrator"
       >
-        <span className="block w-full h-full animate-pulse bg-gradient-to-r from-red-900/60 via-red-800/40 to-red-900/60" />
+        <GlitchText length={charLen} />
       </span>
     );
   }
@@ -64,7 +126,6 @@ export default function Word({
     const isClickable =
       interactionMode === "redact" || interactionMode === "flag";
 
-    // Overlay opacity scales with flag count: 1 flag = light, 20 flags = 80%
     const overlayOpacity = Math.min(
       (word.flag_count / VALIDATION.MAX_FLAG_COUNT) * 0.8,
       0.8
@@ -78,9 +139,7 @@ export default function Word({
         onClick={() => isClickable && onWordClick(word.id)}
         role={isClickable ? "button" : undefined}
       >
-        {/* The word text, always visible underneath */}
         <span className="relative z-0">{word.content}</span>
-        {/* Black overlay simulating flag/censorship -- still partially readable */}
         <span
           className="absolute inset-0 bg-black rounded-sm pointer-events-none"
           style={{ opacity: overlayOpacity }}
@@ -104,4 +163,6 @@ export default function Word({
       {word.content}
     </span>
   );
-}
+});
+
+export default Word;
