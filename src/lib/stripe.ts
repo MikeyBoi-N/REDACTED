@@ -44,10 +44,9 @@ export async function createPaymentIntent(
     amount: amountInCents,
     currency: "usd",
     metadata,
-    // Explicitly set payment methods: card (includes Google Pay/Apple Pay) + Link
-    payment_method_types: ["card", "link"],
-    // Save payment method for session reuse — skips re-entry next time
-    setup_future_usage: "on_session",
+    // Card type includes Google Pay / Apple Pay automatically via Payment Element.
+    // "automatic_payment_methods" is Stripe's default and handles availability.
+    automatic_payment_methods: { enabled: true },
   });
 
   if (!intent.client_secret) {
