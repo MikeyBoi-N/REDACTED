@@ -3,7 +3,7 @@
  *
  * Inputs: Admin action request body + auth headers
  * Outputs: Action result
- * Side Effects: Writes/redacts/removes/flags/restores/deletes/protects words
+ * Side Effects: Writes/redacts/removes/flags/restores/deletes/protects/reorders/edits words
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -22,6 +22,8 @@ import {
   adminDeleteWord,
   adminProtectWord,
   adminUnprotectWord,
+  adminReorderWord,
+  adminEditWord,
 } from "@/lib/words";
 import { AdminActionRequest, AdminActionType } from "@/lib/types";
 
@@ -39,35 +41,22 @@ export async function POST(request: NextRequest) {
 
     switch (body.action) {
       case AdminActionType.Write: {
-        if (!body.wordContent) {
-          return NextResponse.json({ error: "wordContent required." }, { status: 400 });
-        }
-        if (body.wordContent.length < 1 || body.wordContent.length > 500) {
-          return NextResponse.json({ error: "Content must be 1–500 chars." }, { status: 400 });
-        }
+        if (!body.wordContent) return NextResponse.json({ error: "wordContent required." }, { status: 400 });
+        if (body.wordContent.length < 1 || body.wordContent.length > 500) return NextResponse.json({ error: "Content must be 1–500 chars." }, { status: 400 });
         const wordIds = await adminWriteWord(body.wordContent);
         return NextResponse.json({ success: true, wordIds, count: wordIds.length });
       }
 
       case AdminActionType.InsertAt: {
-        if (!body.wordContent || body.position == null) {
-          return NextResponse.json({ error: "wordContent and position required." }, { status: 400 });
-        }
+        if (!body.wordContent || body.position == null) return NextResponse.json({ error: "wordContent and position required." }, { status: 400 });
         const wordIds = await adminInsertWordAt(body.wordContent, body.position);
         return NextResponse.json({ success: true, wordIds, count: wordIds.length });
       }
 
       case AdminActionType.InsertLineBreak: {
-        if (body.position == null) {
-          return NextResponse.json({ error: "position required." }, { status: 400 });
-        }
+        if (body.position == null) return NextResponse.json({ error: "position required." }, { status: 400 });
         const id = await adminInsertLineBreak(body.position);
-        if (!id) {
-          return NextResponse.json(
-            { error: "Line breaks must be at least 10 words apart." },
-            { status: 400 }
-          );
-        }
+        if (!id) return NextResponse.json({ error: "Line breaks must be at least 10 words apart." }, { status: 400 });
         return NextResponse.json({ success: true, wordId: id });
       }
 
@@ -119,6 +108,16 @@ export async function POST(request: NextRequest) {
       case AdminActionType.Unprotect: {
         if (!body.wordId) return NextResponse.json({ error: "wordId required." }, { status: 400 });
         return NextResponse.json({ success: await adminUnprotectWord(body.wordId) });
+      }
+
+      case AdminActionType.Reorder: {
+        if (!body.wordId || body.newPosition == null) return NextResponse.json({ error: "wordId and newPosition required." }, { status: 400 });
+        return NextResponse.json({ success: await adminReorderWord(body.wordId, body.newPosition) });
+      }
+
+      case AdminActionType.Edit: {
+        if (!body.wordId || !body.wordContent) return NextResponse.json({ error: "wordId and wordContent required." }, { status: 400 });
+        return NextResponse.json({ success: await adminEditWord(body.wordId, body.wordContent) });
       }
 
       default:

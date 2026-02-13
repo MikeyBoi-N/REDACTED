@@ -2,11 +2,12 @@
  * Admin Panel — hidden moderation UI for content management.
  *
  * Features:
- * - Write (free, unrestricted characters, append or insert at position)
- * - Insert line breaks (enforced 10-word minimum spacing)
- * - Mass operations: checkbox selection + bulk actions
- * - Individual actions: flag, redact, admin lock, protect, uncover, nuclear, restore, delete
- * - Fuzzy search, sort, filter, CSV download
+ * - Write (free, unrestricted, each word = separate DB entry)
+ * - Insert line breaks (draggable formatting elements)
+ * - Drag-and-drop reordering (any word/line-break can be dragged to a new position)
+ * - Inline word editing (click content → edit → save)
+ * - Mass operations with shift-click range selection
+ * - Fuzzy search, sort by column, status/length filters, CSV export
  * - Action log
  *
  * Inputs: None
@@ -16,7 +17,7 @@
 
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
 interface AdminWord {
   readonly id: string;
@@ -41,26 +42,18 @@ type AdminAction =
   | "unflag"
   | "delete"
   | "protect"
-  | "unprotect";
+  | "unprotect"
+  | "reorder"
+  | "edit";
 
 type SortField = "position" | "content" | "status" | "length" | "flags" | "created";
 type SortDir = "asc" | "desc";
 
 const STATUS_OPTIONS = [
-  "all",
-  "visible",
-  "protected",
-  "flagged",
-  "redacted",
-  "admin_redacted",
-  "admin_removed",
-  "linebreak",
+  "all", "visible", "protected", "flagged", "redacted",
+  "admin_redacted", "admin_removed", "linebreak",
 ] as const;
 
-/**
- * Simple fuzzy match — checks if all characters of the query appear
- * in order within the target string. O(n) per comparison.
- */
 function fuzzyMatch(target: string, query: string): boolean {
   if (query.length === 0) return true;
   const t = target.toLowerCase();
@@ -80,13 +73,14 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLog, setActionLog] = useState<string[]>([]);
 
-  // Write/insert state
+  // Write/insert
   const [writeInput, setWriteInput] = useState("");
   const [insertPosition, setInsertPosition] = useState("");
   const [writing, setWriting] = useState(false);
 
-  // Mass selection
+  // Selection (supports shift-click range)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const lastClickedIndex = useRef<number | null>(null);
 
   // Search / Sort / Filter
   const [searchQuery, setSearchQuery] = useState("");
@@ -95,6 +89,15 @@ export default function AdminPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [minLength, setMinLength] = useState("");
   const [maxLength, setMaxLength] = useState("");
+
+  // Inline editing
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  // Drag-and-drop
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
 
   const fetchWords = useCallback(async () => {
     setLoading(true);
@@ -114,22 +117,23 @@ export default function AdminPage() {
     if (authenticated) fetchWords();
   }, [authenticated, fetchWords]);
 
-  // ── Filtered + sorted words (memoized) ──
+  // Auto-focus edit input
+  useEffect(() => {
+    if (editingId && editInputRef.current) editInputRef.current.focus();
+  }, [editingId]);
+
+  // ── Filtered + sorted words ──
   const filteredWords = useMemo(() => {
     const minLen = minLength ? parseInt(minLength, 10) : 0;
     const maxLen = maxLength ? parseInt(maxLength, 10) : Infinity;
 
     const filtered = words.filter((w) => {
-      // Status filter
       if (statusFilter !== "all" && w.status !== statusFilter) return false;
-      // Length filter
       if (w.content_length < minLen || w.content_length > maxLen) return false;
-      // Fuzzy search
       if (searchQuery && !fuzzyMatch(w.content ?? "", searchQuery)) return false;
       return true;
     });
 
-    // Sort
     filtered.sort((a, b) => {
       let cmp = 0;
       switch (sortField) {
@@ -155,7 +159,6 @@ export default function AdminPage() {
     setActionLog((prev) => [msg, ...prev]);
   }, []);
 
-  // ── API call helper ──
   const callAdmin = useCallback(
     async (body: Record<string, unknown>): Promise<{ ok: boolean; data: Record<string, unknown> }> => {
       try {
@@ -185,22 +188,22 @@ export default function AdminPage() {
     [callAdmin, logAction, fetchWords]
   );
 
+  // ── Confirm dialogs ──
   const handleNuclearRemove = useCallback(
     (wordId: string, content: string | null) => {
       if (!window.confirm(`Are you sure you want to NUCLEAR REMOVE "${content ?? "[hidden]"}"?`)) return;
       performAction("nuclear_remove", wordId);
-    },
-    [performAction]
+    }, [performAction]
   );
 
   const handleDelete = useCallback(
     (wordId: string, content: string | null) => {
       if (!window.confirm(`Permanently DELETE "${content ?? "[hidden]"}" from the database?`)) return;
       performAction("delete", wordId);
-    },
-    [performAction]
+    }, [performAction]
   );
 
+  // ── Write / Insert ──
   const handleWrite = useCallback(async () => {
     const text = writeInput.trim();
     if (!text) return;
@@ -226,14 +229,47 @@ export default function AdminPage() {
     setInsertPosition("");
   }, [insertPosition, performAction, logAction]);
 
-  // ── Selection helpers ──
-  const toggleSelect = useCallback((id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+  // ── Inline editing ──
+  const startEdit = useCallback((word: AdminWord) => {
+    setEditingId(word.id);
+    setEditValue(word.content ?? "");
   }, []);
+
+  const saveEdit = useCallback(async () => {
+    if (!editingId || !editValue.trim()) return;
+    await performAction("edit", editingId, { wordContent: editValue.trim() });
+    setEditingId(null);
+    setEditValue("");
+  }, [editingId, editValue, performAction]);
+
+  const cancelEdit = useCallback(() => {
+    setEditingId(null);
+    setEditValue("");
+  }, []);
+
+  // ── Selection with shift-click ──
+  const handleRowClick = useCallback((index: number, wordId: string, event: React.MouseEvent) => {
+    if (event.shiftKey && lastClickedIndex.current !== null) {
+      // Range select: from lastClicked to current
+      const start = Math.min(lastClickedIndex.current, index);
+      const end = Math.max(lastClickedIndex.current, index);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (let i = start; i <= end; i++) {
+          if (filteredWords[i]) next.add(filteredWords[i].id);
+        }
+        return next;
+      });
+    } else {
+      // Toggle single
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.has(wordId) ? next.delete(wordId) : next.add(wordId);
+        return next;
+      });
+    }
+    lastClickedIndex.current = index;
+  }, [filteredWords]);
 
   const selectAllFiltered = useCallback(() => {
     setSelectedIds(new Set(filteredWords.map((w) => w.id)));
@@ -241,6 +277,7 @@ export default function AdminPage() {
 
   const deselectAll = useCallback(() => {
     setSelectedIds(new Set());
+    lastClickedIndex.current = null;
   }, []);
 
   const selectedCount = selectedIds.size;
@@ -259,15 +296,41 @@ export default function AdminPage() {
     [selectedIds, selectedCount, performAction]
   );
 
+  // ── Drag-and-drop ──
+  const handleDragStart = useCallback((wordId: string) => {
+    setDragId(wordId);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    setDropTargetIndex(index);
+  }, []);
+
+  const handleDrop = useCallback(async (targetIndex: number) => {
+    if (!dragId || targetIndex < 0) return;
+    const targetWord = filteredWords[targetIndex];
+    if (!targetWord || dragId === targetWord.id) {
+      setDragId(null);
+      setDropTargetIndex(null);
+      return;
+    }
+    await performAction("reorder", dragId, { newPosition: targetWord.position });
+    setDragId(null);
+    setDropTargetIndex(null);
+  }, [dragId, filteredWords, performAction]);
+
+  const handleDragEnd = useCallback(() => {
+    setDragId(null);
+    setDropTargetIndex(null);
+  }, []);
+
   // ── CSV Export ──
   const downloadCSV = useCallback(() => {
     const headers = ["id", "position", "content", "content_length", "status", "flag_count", "created_at"];
     const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
     const rows = filteredWords.map((w) =>
       [w.id, w.position, w.content ?? "", w.content_length, w.status, w.flag_count, w.created_at]
-        .map(String)
-        .map(escape)
-        .join(",")
+        .map(String).map(escape).join(",")
     );
     const csv = [headers.join(","), ...rows].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -280,7 +343,6 @@ export default function AdminPage() {
     logAction(`📥 Exported ${filteredWords.length} words to CSV`);
   }, [filteredWords, logAction]);
 
-  // ── Sort toggle ──
   const toggleSort = useCallback((field: SortField) => {
     if (sortField === field) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -373,7 +435,6 @@ export default function AdminPage() {
 
         {/* Search / Filter / Sort bar */}
         <div className="mb-4 flex flex-wrap items-center gap-2 px-4 py-2.5 bg-neutral-900 rounded-lg border border-neutral-800">
-          {/* Fuzzy search */}
           <input
             type="text"
             value={searchQuery}
@@ -381,62 +442,31 @@ export default function AdminPage() {
             placeholder="🔍 Search words..."
             className="flex-1 min-w-[140px] bg-neutral-800 text-white text-xs px-2.5 py-1.5 rounded border border-neutral-700 outline-none focus:border-amber-600 placeholder:text-neutral-500"
           />
-          {/* Status filter */}
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="bg-neutral-800 text-white text-xs px-2 py-1.5 rounded border border-neutral-700 outline-none focus:border-amber-600"
           >
             {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s === "all" ? "All statuses" : s}
-              </option>
+              <option key={s} value={s}>{s === "all" ? "All statuses" : s}</option>
             ))}
           </select>
-          {/* Length range */}
           <div className="flex items-center gap-1">
-            <input
-              type="text"
-              value={minLength}
-              onChange={(e) => setMinLength(e.target.value.replace(/\D/g, ""))}
-              placeholder="Min len"
-              className="w-16 bg-neutral-800 text-white text-xs px-2 py-1.5 rounded border border-neutral-700 outline-none focus:border-amber-600 placeholder:text-neutral-500"
-            />
+            <input type="text" value={minLength} onChange={(e) => setMinLength(e.target.value.replace(/\D/g, ""))} placeholder="Min" className="w-12 bg-neutral-800 text-white text-xs px-2 py-1.5 rounded border border-neutral-700 outline-none focus:border-amber-600 placeholder:text-neutral-500" />
             <span className="text-neutral-600 text-xs">–</span>
-            <input
-              type="text"
-              value={maxLength}
-              onChange={(e) => setMaxLength(e.target.value.replace(/\D/g, ""))}
-              placeholder="Max len"
-              className="w-16 bg-neutral-800 text-white text-xs px-2 py-1.5 rounded border border-neutral-700 outline-none focus:border-amber-600 placeholder:text-neutral-500"
-            />
+            <input type="text" value={maxLength} onChange={(e) => setMaxLength(e.target.value.replace(/\D/g, ""))} placeholder="Max" className="w-12 bg-neutral-800 text-white text-xs px-2 py-1.5 rounded border border-neutral-700 outline-none focus:border-amber-600 placeholder:text-neutral-500" />
           </div>
-          {/* Sort */}
           <div className="flex items-center gap-1">
             <span className="text-neutral-500 text-xs">Sort:</span>
             {(["position", "content", "length", "flags", "status", "created"] as SortField[]).map((f) => (
-              <button
-                key={f}
-                onClick={() => toggleSort(f)}
-                className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
-                  sortField === f
-                    ? "bg-amber-900/50 text-amber-300"
-                    : "bg-neutral-800 text-neutral-500 hover:text-white"
-                }`}
-              >
+              <button key={f} onClick={() => toggleSort(f)} className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${sortField === f ? "bg-amber-900/50 text-amber-300" : "bg-neutral-800 text-neutral-500 hover:text-white"}`}>
                 {f === "position" ? "#" : f === "content" ? "Aa" : f === "length" ? "Len" : f === "flags" ? "🚩" : f === "created" ? "Date" : f}
                 {sortField === f && (sortDir === "asc" ? " ↑" : " ↓")}
               </button>
             ))}
           </div>
-          {/* Clear filters */}
           {(searchQuery || statusFilter !== "all" || minLength || maxLength) && (
-            <button
-              onClick={() => { setSearchQuery(""); setStatusFilter("all"); setMinLength(""); setMaxLength(""); }}
-              className="text-neutral-500 text-xs hover:text-white"
-            >
-              ✕ Clear
-            </button>
+            <button onClick={() => { setSearchQuery(""); setStatusFilter("all"); setMinLength(""); setMaxLength(""); }} className="text-neutral-500 text-xs hover:text-white">✕ Clear</button>
           )}
         </div>
 
@@ -444,11 +474,13 @@ export default function AdminPage() {
         {selectedCount > 0 && (
           <div className="mb-4 flex flex-wrap items-center gap-2 px-4 py-2 bg-neutral-900 rounded-lg border border-blue-900/40">
             <span className="text-blue-400 text-xs font-medium">{selectedCount} selected</span>
+            <span className="text-neutral-700 text-[10px]">(shift+click for range)</span>
             <button onClick={deselectAll} className="text-neutral-500 text-xs hover:text-white">Clear</button>
             <span className="text-neutral-700">|</span>
             <button onClick={() => batchAction("redact")} className="px-2 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-xs rounded">██ Redact</button>
             <button onClick={() => batchAction("admin_redact")} className="px-2 py-0.5 bg-neutral-800 hover:bg-purple-900 text-xs rounded text-purple-300">🔒 Lock</button>
             <button onClick={() => batchAction("nuclear_remove")} className="px-2 py-0.5 bg-neutral-800 hover:bg-red-900 text-xs rounded text-red-300">☢ Nuclear</button>
+            <button onClick={() => batchAction("restore")} className="px-2 py-0.5 bg-neutral-800 hover:bg-emerald-900 text-xs rounded text-emerald-300">♻ Restore</button>
             <button onClick={() => batchAction("flag")} className="px-2 py-0.5 bg-neutral-800 hover:bg-amber-900 text-xs rounded text-amber-300">🚩+ Flag</button>
             <button onClick={() => batchAction("unflag")} className="px-2 py-0.5 bg-neutral-800 hover:bg-green-900 text-xs rounded text-green-300">🚩− Unflag</button>
             <button onClick={() => batchAction("protect")} className="px-2 py-0.5 bg-neutral-800 hover:bg-teal-900 text-xs rounded text-teal-300">🛡 Protect</button>
@@ -458,7 +490,7 @@ export default function AdminPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Word list */}
-          <div className="lg:col-span-2 space-y-1">
+          <div className="lg:col-span-2 space-y-0.5">
             {/* Select all row */}
             <div className="flex items-center gap-2 px-3 py-1 text-neutral-500 text-xs">
               <input
@@ -468,6 +500,7 @@ export default function AdminPage() {
                 className="accent-amber-600"
               />
               <span>Select all ({filteredWords.length})</span>
+              <span className="ml-auto text-neutral-600">Drag ≡ to reorder • Click text to edit</span>
             </div>
 
             {loading ? (
@@ -475,51 +508,90 @@ export default function AdminPage() {
             ) : filteredWords.length === 0 ? (
               <p className="text-neutral-500 px-3">{words.length === 0 ? "No words yet." : "No matches."}</p>
             ) : (
-              filteredWords.map((word) => (
+              filteredWords.map((word, index) => (
                 <div
                   key={word.id}
+                  draggable
+                  onDragStart={() => handleDragStart(word.id)}
+                  onDragOver={(e) => handleDragOver(e, index)}
+                  onDrop={() => handleDrop(index)}
+                  onDragEnd={handleDragEnd}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded border transition-colors ${
-                    selectedIds.has(word.id)
+                    dragId === word.id
+                      ? "opacity-40 border-amber-600"
+                      : dropTargetIndex === index && dragId
+                      ? "border-amber-500 bg-amber-950/20"
+                      : selectedIds.has(word.id)
                       ? "bg-blue-950/40 border-blue-800/50"
                       : "bg-neutral-900 border-neutral-800 hover:border-neutral-700"
                   }`}
                 >
+                  {/* Drag handle */}
+                  <span
+                    className="text-neutral-600 hover:text-neutral-400 cursor-grab active:cursor-grabbing text-xs shrink-0 select-none"
+                    title="Drag to reorder"
+                  >
+                    ≡
+                  </span>
+
                   {/* Checkbox */}
                   <input
                     type="checkbox"
                     checked={selectedIds.has(word.id)}
-                    onChange={() => toggleSelect(word.id)}
+                    onChange={(e) => {
+                      // Use the native event for shift detection
+                      const nativeEvent = e.nativeEvent as MouseEvent;
+                      handleRowClick(index, word.id, { shiftKey: nativeEvent.shiftKey } as React.MouseEvent);
+                    }}
                     className="accent-amber-600 shrink-0"
                   />
 
                   {/* Position */}
-                  <span className="text-neutral-600 text-xs font-mono w-8 shrink-0">
-                    #{word.position}
-                  </span>
+                  <span className="text-neutral-600 text-xs font-mono w-8 shrink-0">#{word.position}</span>
 
-                  {/* Content */}
-                  <span
-                    className={`flex-1 text-sm font-serif truncate ${
-                      word.status === "linebreak"
-                        ? "text-neutral-600 italic"
-                        : word.status === "redacted" || word.status === "admin_redacted"
-                        ? "text-neutral-600 line-through"
-                        : word.status === "admin_removed"
-                        ? "text-red-500 line-through"
-                        : word.status === "flagged"
-                        ? "text-amber-400"
-                        : word.status === "protected"
-                        ? "text-teal-300"
-                        : "text-white"
-                    }`}
-                  >
-                    {word.status === "linebreak" ? "¶ [line break]" : word.content ?? "[hidden]"}
-                  </span>
+                  {/* Content — editable on click */}
+                  {editingId === word.id ? (
+                    <div className="flex-1 flex items-center gap-1 min-w-0">
+                      <input
+                        ref={editInputRef}
+                        type="text"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveEdit();
+                          if (e.key === "Escape") cancelEdit();
+                        }}
+                        className="flex-1 bg-neutral-800 text-white text-sm px-2 py-0.5 rounded border border-amber-700 outline-none font-serif"
+                      />
+                      <button onClick={saveEdit} className="px-1.5 py-0.5 bg-green-900 hover:bg-green-800 text-green-300 text-[10px] rounded">Save</button>
+                      <button onClick={cancelEdit} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 text-[10px] rounded">Esc</button>
+                    </div>
+                  ) : (
+                    <span
+                      onClick={() => word.status !== "linebreak" && startEdit(word)}
+                      className={`flex-1 text-sm font-serif truncate ${
+                        word.status !== "linebreak" ? "cursor-text hover:bg-neutral-800/50 rounded px-1 -mx-1" : ""
+                      } ${
+                        word.status === "linebreak"
+                          ? "text-neutral-600 italic"
+                          : word.status === "redacted" || word.status === "admin_redacted"
+                          ? "text-neutral-600 line-through"
+                          : word.status === "admin_removed"
+                          ? "text-red-500 line-through"
+                          : word.status === "flagged"
+                          ? "text-amber-400"
+                          : word.status === "protected"
+                          ? "text-teal-300"
+                          : "text-white"
+                      }`}
+                      title={word.status !== "linebreak" ? "Click to edit" : undefined}
+                    >
+                      {word.status === "linebreak" ? "¶ [line break]" : word.content ?? "[hidden]"}
+                    </span>
+                  )}
 
                   {/* Length */}
-                  <span className="text-neutral-600 text-[10px] font-mono w-6 text-right shrink-0">
-                    {word.content_length}
-                  </span>
+                  <span className="text-neutral-600 text-[10px] font-mono w-6 text-right shrink-0">{word.content_length}</span>
 
                   {/* Status badge */}
                   <span
@@ -549,7 +621,6 @@ export default function AdminPage() {
 
                   {/* Individual actions */}
                   <div className="flex gap-1 shrink-0">
-                    {/* Flag/unflag */}
                     {word.status !== "admin_removed" && word.status !== "admin_redacted" && word.status !== "linebreak" && word.status !== "protected" && (
                       <>
                         <button onClick={() => performAction("flag", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-amber-900 text-neutral-400 hover:text-amber-300 text-[10px] rounded" title="Flag">🚩+</button>
@@ -558,34 +629,27 @@ export default function AdminPage() {
                         )}
                       </>
                     )}
-                    {/* Redact */}
                     {(word.status === "visible" || word.status === "flagged") && (
                       <button onClick={() => performAction("redact", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white text-[10px] rounded" title="Redact">██</button>
                     )}
-                    {/* Admin lock */}
                     {(word.status === "visible" || word.status === "flagged" || word.status === "redacted") && (
                       <button onClick={() => performAction("admin_redact", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-purple-900 text-neutral-400 hover:text-purple-300 text-[10px] rounded" title="Admin Lock">🔒</button>
                     )}
-                    {/* Uncover */}
                     {(word.status === "redacted" || word.status === "admin_redacted") && (
                       <button onClick={() => performAction("uncover", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-blue-900 text-neutral-400 hover:text-blue-300 text-[10px] rounded" title="Uncover">👁</button>
                     )}
-                    {/* Nuclear */}
                     {word.status !== "admin_removed" && word.status !== "linebreak" && (
                       <button onClick={() => handleNuclearRemove(word.id, word.content)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-red-900 text-neutral-400 hover:text-red-300 text-[10px] rounded" title="Nuclear">☢</button>
                     )}
-                    {/* Restore */}
                     {word.status === "admin_removed" && (
                       <button onClick={() => performAction("restore", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-emerald-900 text-neutral-400 hover:text-emerald-300 text-[10px] rounded" title="Restore">♻</button>
                     )}
-                    {/* Protect / Unprotect */}
                     {(word.status === "visible" || word.status === "flagged") && (
-                      <button onClick={() => performAction("protect", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-teal-900 text-neutral-400 hover:text-teal-300 text-[10px] rounded" title="Protect from redaction">🛡</button>
+                      <button onClick={() => performAction("protect", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-teal-900 text-neutral-400 hover:text-teal-300 text-[10px] rounded" title="Protect">🛡</button>
                     )}
                     {word.status === "protected" && (
-                      <button onClick={() => performAction("unprotect", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-teal-900 text-teal-400 hover:text-teal-200 text-[10px] rounded" title="Remove protection">🛡⁻</button>
+                      <button onClick={() => performAction("unprotect", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-teal-900 text-teal-400 hover:text-teal-200 text-[10px] rounded" title="Unprotect">🛡⁻</button>
                     )}
-                    {/* Delete (hard) */}
                     <button onClick={() => handleDelete(word.id, word.content)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-red-900 text-neutral-400 hover:text-red-300 text-[10px] rounded" title="Delete from DB">🗑</button>
                   </div>
                 </div>

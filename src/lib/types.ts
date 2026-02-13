@@ -90,13 +90,16 @@ export enum AdminActionType {
   Delete = "delete",
   Protect = "protect",
   Unprotect = "unprotect",
+  Reorder = "reorder",
+  Edit = "edit",
 }
 
 export interface AdminActionRequest {
   readonly action: AdminActionType;
   readonly wordId?: string;
   readonly wordContent?: string;
-  readonly position?: number; // for inserting at a specific position
+  readonly position?: number;
+  readonly newPosition?: number;
 }
 
 // ── Pricing Constants (Single Source of Truth) ────────────────

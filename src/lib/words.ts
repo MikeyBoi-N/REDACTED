@@ -468,6 +468,67 @@ export async function adminUnprotectWord(wordId: string): Promise<boolean> {
 }
 
 /**
+ * Admin: move a word to a new position.
+ * Shifts intermediate words to fill the gap and make room.
+ */
+export async function adminReorderWord(
+  wordId: string,
+  newPosition: number
+): Promise<boolean> {
+  const word = await queryOne<WordRecord>(
+    `SELECT * FROM words WHERE id = $1`,
+    [wordId]
+  );
+  if (!word) return false;
+
+  const oldPosition = word.position;
+  if (oldPosition === newPosition) return true; // no-op
+
+  if (newPosition > oldPosition) {
+    // Moving down: shift words in (old, new] up by -1
+    await query(
+      `UPDATE words SET position = position - 1
+       WHERE position > $1 AND position <= $2 AND id != $3`,
+      [oldPosition, newPosition, wordId]
+    );
+  } else {
+    // Moving up: shift words in [new, old) down by +1
+    await query(
+      `UPDATE words SET position = position + 1
+       WHERE position >= $1 AND position < $2 AND id != $3`,
+      [newPosition, oldPosition, wordId]
+    );
+  }
+
+  await query(`UPDATE words SET position = $1 WHERE id = $2`, [
+    newPosition,
+    wordId,
+  ]);
+  return true;
+}
+
+/**
+ * Admin: edit the content of an existing word in-place.
+ * Only updates the text; status and position remain unchanged.
+ */
+export async function adminEditWord(
+  wordId: string,
+  newContent: string
+): Promise<boolean> {
+  const word = await queryOne<WordRecord>(
+    `SELECT * FROM words WHERE id = $1`,
+    [wordId]
+  );
+  if (!word) return false;
+
+  await query(
+    `UPDATE words SET content = $1, content_length = $2 WHERE id = $3`,
+    [newContent, newContent.length, wordId]
+  );
+  return true;
+}
+
+/**
  * Opacity formula from the Architecture Spec:
  * opacity = (flag_count / 20) * 0.80
  * Range: 0.04 (1 flag) → 0.80 (20 flags)
