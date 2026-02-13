@@ -254,6 +254,74 @@ export async function adminWriteWord(content: string): Promise<string> {
 }
 
 /**
+ * Admin: insert a word at a specific position.
+ * Shifts all words at >= that position up by 1 first.
+ */
+export async function adminInsertWordAt(
+  content: string,
+  position: number
+): Promise<string> {
+  const id = uuidv4();
+  // Shift existing words at or after this position
+  await query(
+    `UPDATE words SET position = position + 1 WHERE position >= $1 AND status != $2`,
+    [position, WordStatus.Pending]
+  );
+  await query(
+    `INSERT INTO words (id, content, status, position) VALUES ($1, $2, $3, $4)`,
+    [id, content, WordStatus.Visible, position]
+  );
+  return id;
+}
+
+/**
+ * Admin: insert a line break at a specific position.
+ * Enforces the 10-word minimum spacing rule between line breaks.
+ * Returns the line break word ID or null if the rule is violated.
+ */
+export async function adminInsertLineBreak(
+  position: number
+): Promise<string | null> {
+  // Check: nearest line break must be >= 10 positions away
+  const nearbyBreak = await queryOne<{ id: string }>(
+    `SELECT id FROM words
+     WHERE status = $1 AND ABS(position - $2) < 10
+     LIMIT 1`,
+    [WordStatus.LineBreak, position]
+  );
+  if (nearbyBreak) return null; // too close to another line break
+
+  const id = uuidv4();
+  // Shift existing words
+  await query(
+    `UPDATE words SET position = position + 1 WHERE position >= $1 AND status != $2`,
+    [position, WordStatus.Pending]
+  );
+  await query(
+    `INSERT INTO words (id, content, status, position) VALUES ($1, $2, $3, $4)`,
+    [id, "\n", WordStatus.LineBreak, position]
+  );
+  return id;
+}
+
+/**
+ * Admin: hard delete a word from the database entirely.
+ * This is irreversible — the word is removed as if it never existed.
+ */
+export async function adminDeleteWord(wordId: string): Promise<boolean> {
+  const word = await queryOne<WordRecord>(
+    `SELECT * FROM words WHERE id = $1`,
+    [wordId]
+  );
+  if (!word) return false;
+
+  await query(`DELETE FROM words WHERE id = $1`, [wordId]);
+  // Also delete any flag records for this word
+  await query(`DELETE FROM word_flags WHERE word_id = $1`, [wordId]);
+  return true;
+}
+
+/**
  * Admin: force-add a flag to a word, bypassing duplicate/rate-limit checks.
  * Sets status to 'flagged' if currently 'visible'.
  */

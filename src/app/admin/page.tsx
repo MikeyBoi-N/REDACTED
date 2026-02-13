@@ -1,11 +1,12 @@
 /**
  * Admin Panel — hidden moderation UI for content management.
  *
- * Accessed via URL: /admin
- * Authenticates with secret token via the admin API (sent as x-admin-token header).
- * All tools are unbound: write (free, no char restrictions), flag/unflag (no dupe check),
- * redact (user-undoable), admin redact (permanent), uncover, nuclear remove (with confirm),
- * restore (reverse nuclear remove).
+ * Features:
+ * - Write (free, unrestricted characters, append or insert at position)
+ * - Insert line breaks (enforced 10-word minimum spacing)
+ * - Mass operations: checkbox selection + bulk redact/admin_redact/nuclear/delete/flag/unflag
+ * - Individual actions: flag+/−, redact, admin lock, uncover, nuclear (with confirm), restore, delete
+ * - Action log
  *
  * Inputs: None
  * Outputs: Full admin moderation interface
@@ -14,27 +15,30 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 
 interface AdminWord {
   readonly id: string;
   readonly position: number;
   readonly content: string | null;
+  readonly content_length: number;
   readonly status: string;
   readonly flag_count: number;
   readonly created_at: string;
 }
 
-/** Must match AdminActionType enum from lib/types.ts */
 type AdminAction =
   | "write"
+  | "insert_at"
+  | "insert_linebreak"
   | "redact"
   | "admin_redact"
   | "uncover"
   | "nuclear_remove"
   | "restore"
   | "flag"
-  | "unflag";
+  | "unflag"
+  | "delete";
 
 export default function AdminPage() {
   const [token, setToken] = useState("");
@@ -44,9 +48,13 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLog, setActionLog] = useState<string[]>([]);
 
-  // Write tool state
+  // Write/insert state
   const [writeInput, setWriteInput] = useState("");
+  const [insertPosition, setInsertPosition] = useState("");
   const [writing, setWriting] = useState(false);
+
+  // Mass selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const fetchWords = useCallback(async () => {
     setLoading(true);
@@ -63,92 +71,137 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
-    if (authenticated) {
-      fetchWords();
-    }
+    if (authenticated) fetchWords();
   }, [authenticated, fetchWords]);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (token.trim()) {
-      setAuthenticated(true);
-    }
+    if (token.trim()) setAuthenticated(true);
   };
 
-  const logAction = useCallback((message: string) => {
-    setActionLog((prev) => [message, ...prev]);
+  const logAction = useCallback((msg: string) => {
+    setActionLog((prev) => [msg, ...prev]);
   }, []);
 
-  /** Send admin action — token goes in the x-admin-token header. */
-  const performAction = useCallback(
-    async (action: AdminAction, wordId?: string, wordContent?: string) => {
+  // ── API call helper ──
+  const callAdmin = useCallback(
+    async (body: Record<string, unknown>): Promise<{ ok: boolean; data: Record<string, unknown> }> => {
       try {
-        const body: Record<string, string> = { action };
-        if (wordId) body.wordId = wordId;
-        if (wordContent) body.wordContent = wordContent;
-
         const res = await fetch("/api/admin", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-admin-token": token,
-          },
+          headers: { "Content-Type": "application/json", "x-admin-token": token },
           body: JSON.stringify(body),
         });
-
         const data = await res.json();
-        const label = wordId ? `#${wordId.slice(0, 8)}…` : wordContent ?? "";
-
-        if (!res.ok) {
-          logAction(`❌ ${action} ${label} — ${data.error ?? res.status}`);
-          return;
-        }
-
-        logAction(`✅ ${action} ${label} — success`);
-        fetchWords();
+        return { ok: res.ok, data };
       } catch {
-        logAction(`❌ ${action} failed — network error`);
+        return { ok: false, data: { error: "network error" } };
       }
     },
-    [token, fetchWords, logAction]
+    [token]
   );
 
-  /** Nuclear remove with confirmation prompt. */
+  const performAction = useCallback(
+    async (action: AdminAction, wordId?: string, extra?: Record<string, unknown>) => {
+      const body: Record<string, unknown> = { action, ...extra };
+      if (wordId) body.wordId = wordId;
+      const { ok, data } = await callAdmin(body);
+      const label = wordId ? `#${wordId.slice(0, 8)}…` : "";
+      logAction(ok ? `✅ ${action} ${label}` : `❌ ${action} ${label} — ${data.error ?? "failed"}`);
+      if (ok) fetchWords();
+    },
+    [callAdmin, logAction, fetchWords]
+  );
+
+  // ── Nuclear confirm ──
   const handleNuclearRemove = useCallback(
-    (wordId: string, wordContent: string | null) => {
-      const display = wordContent ?? "[hidden]";
-      const confirmed = window.confirm(
-        `Are you sure you want to NUCLEAR REMOVE "${display}"?\n\nThis will replace the word with glitch art. You can restore it later.`
-      );
-      if (confirmed) {
-        performAction("nuclear_remove", wordId);
-      }
+    (wordId: string, content: string | null) => {
+      if (!window.confirm(`Are you sure you want to NUCLEAR REMOVE "${content ?? "[hidden]"}"?`)) return;
+      performAction("nuclear_remove", wordId);
     },
     [performAction]
   );
 
-  /** Admin write — free, no character restrictions. */
-  const handleAdminWrite = useCallback(async () => {
-    const word = writeInput.trim();
-    if (!word) return;
+  // ── Delete confirm ──
+  const handleDelete = useCallback(
+    (wordId: string, content: string | null) => {
+      if (!window.confirm(`Permanently DELETE "${content ?? "[hidden]"}" from the database?`)) return;
+      performAction("delete", wordId);
+    },
+    [performAction]
+  );
 
+  // ── Write / Insert ──
+  const handleWrite = useCallback(async () => {
+    const text = writeInput.trim();
+    if (!text) return;
     setWriting(true);
-    await performAction("write", undefined, word);
-    setWriteInput("");
-    setWriting(false);
-  }, [writeInput, performAction]);
 
-  // ── Login screen ──
+    const pos = parseInt(insertPosition, 10);
+    if (insertPosition && !isNaN(pos)) {
+      await performAction("insert_at", undefined, { wordContent: text, position: pos });
+    } else {
+      await performAction("write", undefined, { wordContent: text });
+    }
+    setWriteInput("");
+    setInsertPosition("");
+    setWriting(false);
+  }, [writeInput, insertPosition, performAction]);
+
+  // ── Line break insert ──
+  const handleInsertLineBreak = useCallback(async () => {
+    const pos = parseInt(insertPosition, 10);
+    if (isNaN(pos)) {
+      logAction("❌ Enter a position number for the line break");
+      return;
+    }
+    await performAction("insert_linebreak", undefined, { position: pos });
+    setInsertPosition("");
+  }, [insertPosition, performAction, logAction]);
+
+  // ── Selection helpers ──
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAll = useCallback(() => {
+    setSelectedIds(new Set(words.map((w) => w.id)));
+  }, [words]);
+
+  const deselectAll = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const selectedCount = selectedIds.size;
+
+  // ── Batch operation ──
+  const batchAction = useCallback(
+    async (action: AdminAction) => {
+      if (selectedCount === 0) return;
+
+      // Destructive batch actions need confirmation
+      if (action === "nuclear_remove" || action === "delete") {
+        if (!window.confirm(`${action.toUpperCase()} ${selectedCount} word(s)?`)) return;
+      }
+
+      for (const id of selectedIds) {
+        await performAction(action, id);
+      }
+      setSelectedIds(new Set());
+    },
+    [selectedIds, selectedCount, performAction]
+  );
+
+  // ── Login ──
   if (!authenticated) {
     return (
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center p-4">
-        <form
-          onSubmit={handleLogin}
-          className="w-full max-w-sm p-6 bg-neutral-900 rounded-lg border border-neutral-800"
-        >
-          <h1 className="text-white font-mono text-lg mb-4">
-            [ ADMIN ACCESS ]
-          </h1>
+        <form onSubmit={handleLogin} className="w-full max-w-sm p-6 bg-neutral-900 rounded-lg border border-neutral-800">
+          <h1 className="text-white font-mono text-lg mb-4">[ ADMIN ACCESS ]</h1>
           <input
             type="password"
             value={token}
@@ -157,10 +210,7 @@ export default function AdminPage() {
             className="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 rounded text-white text-sm outline-none focus:border-amber-600 mb-3"
             autoFocus
           />
-          <button
-            type="submit"
-            className="w-full py-2 bg-amber-700 hover:bg-amber-600 text-white text-sm font-medium rounded transition-colors"
-          >
+          <button type="submit" className="w-full py-2 bg-amber-700 hover:bg-amber-600 text-white text-sm font-medium rounded transition-colors">
             Authenticate
           </button>
         </form>
@@ -168,76 +218,111 @@ export default function AdminPage() {
     );
   }
 
-  // ── Admin dashboard ──
+  // ── Dashboard ──
   return (
-    <div className="min-h-screen bg-neutral-950 text-white p-6">
-      <div className="max-w-5xl mx-auto">
+    <div className="min-h-screen bg-neutral-950 text-white p-4 sm:p-6">
+      <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-4">
           <h1 className="text-xl font-mono font-bold">[ ADMIN PANEL ]</h1>
           <div className="flex items-center gap-3">
-            <span className="text-neutral-500 text-xs font-mono">
-              {words.length} words
-            </span>
-            <button
-              onClick={fetchWords}
-              className="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 rounded text-xs transition-colors"
-            >
+            <span className="text-neutral-500 text-xs font-mono">{words.length} words</span>
+            <button onClick={fetchWords} className="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 rounded text-xs transition-colors">
               Refresh
             </button>
           </div>
         </div>
 
         {error && (
-          <div className="mb-4 px-4 py-2 bg-red-950 border border-red-800 rounded text-red-300 text-sm">
-            {error}
-          </div>
+          <div className="mb-4 px-4 py-2 bg-red-950 border border-red-800 rounded text-red-300 text-sm">{error}</div>
         )}
 
-        {/* Legend */}
-        <div className="mb-4 flex flex-wrap gap-3 text-[10px] text-neutral-500">
-          <span>██ = Redact (users can pay to uncover)</span>
-          <span>🔒 = Admin Lock (permanent, only admin can undo)</span>
-          <span>☢ = Nuclear Remove (glitch art, admin can restore)</span>
-        </div>
-
-        {/* Admin write tool — unbound, free, no char restrictions */}
-        <div className="mb-6 flex items-center gap-2 px-4 py-3 bg-neutral-900 rounded-lg border border-amber-900/40">
+        {/* Write / Insert controls */}
+        <div className="mb-4 flex flex-wrap items-center gap-2 px-4 py-3 bg-neutral-900 rounded-lg border border-amber-900/40">
           <span className="text-amber-500 text-sm font-medium shrink-0">Write:</span>
           <input
             type="text"
             value={writeInput}
             onChange={(e) => setWriteInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAdminWrite()}
-            placeholder="Type anything — no restrictions..."
+            onKeyDown={(e) => e.key === "Enter" && handleWrite()}
+            placeholder="Any text..."
             maxLength={100}
-            className="flex-1 bg-transparent text-white text-sm outline-none placeholder:text-neutral-500"
+            className="flex-1 min-w-[120px] bg-transparent text-white text-sm outline-none placeholder:text-neutral-500"
           />
-          <span className="text-neutral-600 text-xs font-mono shrink-0">
-            {writeInput.length}/100
-          </span>
+          <input
+            type="text"
+            value={insertPosition}
+            onChange={(e) => setInsertPosition(e.target.value.replace(/\D/g, ""))}
+            placeholder="Position (blank=end)"
+            className="w-36 bg-neutral-800 text-white text-xs px-2 py-1.5 rounded border border-neutral-700 outline-none focus:border-amber-600 placeholder:text-neutral-500"
+          />
           <button
-            onClick={handleAdminWrite}
+            onClick={handleWrite}
             disabled={!writeInput.trim() || writing}
             className="px-3 py-1.5 bg-amber-700 hover:bg-amber-600 disabled:bg-neutral-700 disabled:text-neutral-500 text-white text-xs font-medium rounded transition-colors"
           >
-            {writing ? "…" : "Publish (free)"}
+            {writing ? "…" : "Publish"}
+          </button>
+          <button
+            onClick={handleInsertLineBreak}
+            className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 text-neutral-300 text-xs rounded transition-colors"
+            title="Insert line break at position (10-word minimum spacing enforced)"
+          >
+            ¶ Break
           </button>
         </div>
+
+        {/* Batch actions bar */}
+        {selectedCount > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 px-4 py-2 bg-neutral-900 rounded-lg border border-blue-900/40">
+            <span className="text-blue-400 text-xs font-medium">{selectedCount} selected</span>
+            <button onClick={deselectAll} className="text-neutral-500 text-xs hover:text-white">Clear</button>
+            <span className="text-neutral-700">|</span>
+            <button onClick={() => batchAction("redact")} className="px-2 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-xs rounded">██ Redact</button>
+            <button onClick={() => batchAction("admin_redact")} className="px-2 py-0.5 bg-neutral-800 hover:bg-purple-900 text-xs rounded text-purple-300">🔒 Lock</button>
+            <button onClick={() => batchAction("nuclear_remove")} className="px-2 py-0.5 bg-neutral-800 hover:bg-red-900 text-xs rounded text-red-300">☢ Nuclear</button>
+            <button onClick={() => batchAction("flag")} className="px-2 py-0.5 bg-neutral-800 hover:bg-amber-900 text-xs rounded text-amber-300">🚩+ Flag</button>
+            <button onClick={() => batchAction("unflag")} className="px-2 py-0.5 bg-neutral-800 hover:bg-green-900 text-xs rounded text-green-300">🚩− Unflag</button>
+            <button onClick={() => batchAction("delete")} className="px-2 py-0.5 bg-red-900 hover:bg-red-800 text-xs rounded text-red-200">🗑 Delete</button>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Word list */}
           <div className="lg:col-span-2 space-y-1">
+            {/* Select all row */}
+            <div className="flex items-center gap-2 px-3 py-1 text-neutral-500 text-xs">
+              <input
+                type="checkbox"
+                checked={selectedCount === words.length && words.length > 0}
+                onChange={() => (selectedCount === words.length ? deselectAll() : selectAll())}
+                className="accent-amber-600"
+              />
+              <span>Select all</span>
+            </div>
+
             {loading ? (
-              <p className="text-neutral-500 animate-pulse">Loading words...</p>
+              <p className="text-neutral-500 animate-pulse px-3">Loading...</p>
             ) : words.length === 0 ? (
-              <p className="text-neutral-500">No words in the story yet.</p>
+              <p className="text-neutral-500 px-3">No words yet.</p>
             ) : (
               words.map((word) => (
                 <div
                   key={word.id}
-                  className="flex items-center gap-3 px-3 py-2 bg-neutral-900 rounded border border-neutral-800 hover:border-neutral-700 transition-colors"
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded border transition-colors ${
+                    selectedIds.has(word.id)
+                      ? "bg-blue-950/40 border-blue-800/50"
+                      : "bg-neutral-900 border-neutral-800 hover:border-neutral-700"
+                  }`}
                 >
+                  {/* Checkbox */}
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(word.id)}
+                    onChange={() => toggleSelect(word.id)}
+                    className="accent-amber-600 shrink-0"
+                  />
+
                   {/* Position */}
                   <span className="text-neutral-600 text-xs font-mono w-8 shrink-0">
                     #{word.position}
@@ -245,8 +330,10 @@ export default function AdminPage() {
 
                   {/* Content */}
                   <span
-                    className={`flex-1 text-sm font-serif ${
-                      word.status === "redacted" || word.status === "admin_redacted"
+                    className={`flex-1 text-sm font-serif truncate ${
+                      word.status === "linebreak"
+                        ? "text-neutral-600 italic"
+                        : word.status === "redacted" || word.status === "admin_redacted"
                         ? "text-neutral-600 line-through"
                         : word.status === "admin_removed"
                         ? "text-red-500 line-through"
@@ -255,7 +342,7 @@ export default function AdminPage() {
                         : "text-white"
                     }`}
                   >
-                    {word.content ?? "[hidden]"}
+                    {word.status === "linebreak" ? "¶ [line break]" : word.content ?? "[hidden]"}
                   </span>
 
                   {/* Status badge */}
@@ -263,6 +350,8 @@ export default function AdminPage() {
                     className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 ${
                       word.status === "visible"
                         ? "bg-green-950 text-green-400"
+                        : word.status === "linebreak"
+                        ? "bg-cyan-950 text-cyan-400"
                         : word.status === "flagged"
                         ? "bg-amber-950 text-amber-400"
                         : word.status === "redacted"
@@ -272,94 +361,47 @@ export default function AdminPage() {
                         : "bg-red-950 text-red-400"
                     }`}
                   >
-                    {word.status === "admin_redacted" ? "🔒 locked" : word.status}
+                    {word.status === "admin_redacted" ? "🔒" : word.status === "linebreak" ? "¶" : word.status}
                   </span>
 
                   {/* Flag count */}
                   {word.flag_count > 0 && (
-                    <span className="text-xs text-amber-500 shrink-0">
-                      🚩{word.flag_count}
-                    </span>
+                    <span className="text-xs text-amber-500 shrink-0">🚩{word.flag_count}</span>
                   )}
 
-                  {/* Action buttons — all tools, fully unbound */}
+                  {/* Individual actions */}
                   <div className="flex gap-1 shrink-0">
-                    {/* Flag + / Unflag - */}
-                    {word.status !== "admin_removed" && word.status !== "admin_redacted" && (
+                    {/* Flag/unflag */}
+                    {word.status !== "admin_removed" && word.status !== "admin_redacted" && word.status !== "linebreak" && (
                       <>
-                        <button
-                          onClick={() => performAction("flag", word.id)}
-                          className="px-2 py-0.5 bg-neutral-800 hover:bg-amber-900 text-neutral-400 hover:text-amber-300 text-xs rounded transition-colors"
-                          title="Add flag"
-                        >
-                          🚩+
-                        </button>
+                        <button onClick={() => performAction("flag", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-amber-900 text-neutral-400 hover:text-amber-300 text-[10px] rounded" title="Flag">🚩+</button>
                         {word.flag_count > 0 && (
-                          <button
-                            onClick={() => performAction("unflag", word.id)}
-                            className="px-2 py-0.5 bg-neutral-800 hover:bg-green-900 text-neutral-400 hover:text-green-300 text-xs rounded transition-colors"
-                            title="Remove flag"
-                          >
-                            🚩−
-                          </button>
+                          <button onClick={() => performAction("unflag", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-green-900 text-neutral-400 hover:text-green-300 text-[10px] rounded" title="Unflag">🚩−</button>
                         )}
                       </>
                     )}
-
-                    {/* Redact (user-undoable) */}
+                    {/* Redact */}
                     {(word.status === "visible" || word.status === "flagged") && (
-                      <button
-                        onClick={() => performAction("redact", word.id)}
-                        className="px-2 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white text-xs rounded transition-colors"
-                        title="Redact (users can pay to uncover)"
-                      >
-                        ██
-                      </button>
+                      <button onClick={() => performAction("redact", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white text-[10px] rounded" title="Redact">██</button>
                     )}
-
-                    {/* Admin Lock (permanent redaction, only admin can undo) */}
+                    {/* Admin lock */}
                     {(word.status === "visible" || word.status === "flagged" || word.status === "redacted") && (
-                      <button
-                        onClick={() => performAction("admin_redact", word.id)}
-                        className="px-2 py-0.5 bg-neutral-800 hover:bg-purple-900 text-neutral-400 hover:text-purple-300 text-xs rounded transition-colors"
-                        title="Admin Lock — permanent redact, only admin can undo"
-                      >
-                        🔒
-                      </button>
+                      <button onClick={() => performAction("admin_redact", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-purple-900 text-neutral-400 hover:text-purple-300 text-[10px] rounded" title="Admin Lock">🔒</button>
                     )}
-
-                    {/* Uncover (works on both redacted and admin_redacted for admin) */}
+                    {/* Uncover */}
                     {(word.status === "redacted" || word.status === "admin_redacted") && (
-                      <button
-                        onClick={() => performAction("uncover", word.id)}
-                        className="px-2 py-0.5 bg-neutral-800 hover:bg-blue-900 text-neutral-400 hover:text-blue-300 text-xs rounded transition-colors"
-                        title="Uncover"
-                      >
-                        👁
-                      </button>
+                      <button onClick={() => performAction("uncover", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-blue-900 text-neutral-400 hover:text-blue-300 text-[10px] rounded" title="Uncover">👁</button>
                     )}
-
-                    {/* Nuclear remove — with confirmation */}
-                    {word.status !== "admin_removed" && (
-                      <button
-                        onClick={() => handleNuclearRemove(word.id, word.content)}
-                        className="px-2 py-0.5 bg-neutral-800 hover:bg-red-900 text-neutral-400 hover:text-red-300 text-xs rounded transition-colors"
-                        title="Nuclear remove (glitch art)"
-                      >
-                        ☢
-                      </button>
+                    {/* Nuclear */}
+                    {word.status !== "admin_removed" && word.status !== "linebreak" && (
+                      <button onClick={() => handleNuclearRemove(word.id, word.content)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-red-900 text-neutral-400 hover:text-red-300 text-[10px] rounded" title="Nuclear">☢</button>
                     )}
-
-                    {/* Restore — reverse a nuclear remove */}
+                    {/* Restore */}
                     {word.status === "admin_removed" && (
-                      <button
-                        onClick={() => performAction("restore", word.id)}
-                        className="px-2 py-0.5 bg-neutral-800 hover:bg-emerald-900 text-neutral-400 hover:text-emerald-300 text-xs rounded transition-colors"
-                        title="Restore to visible"
-                      >
-                        ♻
-                      </button>
+                      <button onClick={() => performAction("restore", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-emerald-900 text-neutral-400 hover:text-emerald-300 text-[10px] rounded" title="Restore">♻</button>
                     )}
+                    {/* Delete (hard) */}
+                    <button onClick={() => handleDelete(word.id, word.content)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-red-900 text-neutral-400 hover:text-red-300 text-[10px] rounded" title="Delete from DB">🗑</button>
                   </div>
                 </div>
               ))
@@ -374,9 +416,7 @@ export default function AdminPage() {
                 <p className="text-neutral-600 text-xs">No actions yet.</p>
               ) : (
                 actionLog.map((entry, i) => (
-                  <p key={i} className="text-xs text-neutral-400 py-0.5 font-mono">
-                    {entry}
-                  </p>
+                  <p key={i} className="text-xs text-neutral-400 py-0.5 font-mono">{entry}</p>
                 ))
               )}
             </div>

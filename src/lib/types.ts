@@ -12,8 +12,9 @@ export enum WordStatus {
   Visible = "visible",
   Flagged = "flagged",
   Redacted = "redacted",
-  AdminRedacted = "admin_redacted", // Like redacted, but only admin can uncover
+  AdminRedacted = "admin_redacted",
   AdminRemoved = "admin_removed",
+  LineBreak = "linebreak",
 }
 
 // ── Word Record (Database Row) ────────────────────────────────
@@ -76,13 +77,16 @@ export interface ActionResult {
 // ── Admin Action ──────────────────────────────────────────────
 export enum AdminActionType {
   Write = "write",
+  InsertAt = "insert_at",
+  InsertLineBreak = "insert_linebreak",
   Redact = "redact",
-  AdminRedact = "admin_redact", // Permanent — only admin can uncover
+  AdminRedact = "admin_redact",
   Uncover = "uncover",
   NuclearRemove = "nuclear_remove",
-  Restore = "restore", // Reverse a nuclear remove
+  Restore = "restore",
   Flag = "flag",
   Unflag = "unflag",
+  Delete = "delete",
 }
 
 export interface AdminActionRequest {

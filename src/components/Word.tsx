@@ -113,7 +113,7 @@ const Word = memo(function Word({
     return (
       <span
         className="inline-block mx-0.5 align-middle overflow-hidden rounded-sm bg-neutral-950/80"
-        style={{ height: "1.2em" }}
+        style={{ height: "1.1em" }}
         aria-label="Content removed by site administrator"
       >
         <GlitchText length={charLen} />

@@ -144,30 +144,34 @@ export default function Toolbar({
           )}
 
           {isWriteMode ? (
-            /* Expanded state — input field with submit */
-            <div className="flex items-center gap-2 h-10 px-3 rounded-lg bg-amber-900/30 border border-amber-800/40">
-              <span className="text-amber-400 text-sm font-medium">Aa</span>
-              <input
-                ref={inputRef}
-                type="text"
-                value={writeInput}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                placeholder="Type a word or sentence..."
-                className="bg-transparent text-white text-sm outline-none w-48 sm:w-64 placeholder:text-neutral-500"
-              />
-              {wordCount > 0 && (
-                <span className="text-neutral-500 text-xs font-mono shrink-0">
-                  {wordCount > 1 ? `${wordCount} words` : "1 word"}
-                </span>
-              )}
-              <button
-                onClick={handleWriteSubmit}
-                disabled={wordCount === 0}
-                className="px-3 py-1 bg-amber-700 hover:bg-amber-600 disabled:bg-neutral-700 disabled:text-neutral-500 text-white text-xs rounded transition-colors whitespace-nowrap"
-              >
-                {wordCount > 1 ? `Add $${price}` : "Add $1"}
-              </button>
+            /* Expanded state — stacks vertically on mobile, horizontal on desktop */
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 px-3 py-2 sm:h-10 rounded-lg bg-amber-900/30 border border-amber-800/40 w-full sm:w-auto">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <span className="text-amber-400 text-sm font-medium shrink-0">Aa</span>
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={writeInput}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Type a word or sentence..."
+                  className="bg-transparent text-white text-sm outline-none flex-1 min-w-0 placeholder:text-neutral-500"
+                />
+              </div>
+              <div className="flex items-center justify-between sm:justify-end gap-2">
+                {wordCount > 0 && (
+                  <span className="text-neutral-500 text-xs font-mono shrink-0">
+                    {wordCount > 1 ? `${wordCount} words` : "1 word"}
+                  </span>
+                )}
+                <button
+                  onClick={handleWriteSubmit}
+                  disabled={wordCount === 0}
+                  className="px-3 py-1.5 bg-amber-700 hover:bg-amber-600 disabled:bg-neutral-700 disabled:text-neutral-500 text-white text-xs rounded transition-colors whitespace-nowrap"
+                >
+                  {wordCount > 1 ? `Add $${price}` : "Add $1"}
+                </button>
+              </div>
             </div>
           ) : (
             /* Collapsed state — button */

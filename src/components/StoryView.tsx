@@ -1,6 +1,7 @@
 /**
  * StoryView component — the infinite scrolling story document.
  * Renders the story as a continuous parchment-colored panel, always centered.
+ * Handles line break words as visual paragraph separators.
  *
  * Inputs: words array, interaction mode, selected words, word click handler
  * Outputs: Rendered story document
@@ -9,7 +10,7 @@
 
 "use client";
 
-import { ApiWordResponse } from "@/lib/types";
+import { ApiWordResponse, WordStatus } from "@/lib/types";
 import Word from "./Word";
 
 interface StoryViewProps {
@@ -53,17 +54,28 @@ export default function StoryView({
             </div>
           ) : (
             <div className="text-neutral-900 text-lg leading-relaxed font-serif">
-              {words.map((word, index) => (
-                <span key={word.id}>
-                  <Word
-                    word={word}
-                    interactionMode={interactionMode}
-                    isSelected={selectedWords.has(word.id)}
-                    onWordClick={onWordClick}
-                  />
-                  {index < words.length - 1 && " "}
-                </span>
-              ))}
+              {words.map((word, index) => {
+                // Line break words render as paragraph separators
+                if (word.status === WordStatus.LineBreak) {
+                  return (
+                    <span key={word.id} className="block h-4" aria-hidden="true" />
+                  );
+                }
+
+                return (
+                  <span key={word.id}>
+                    <Word
+                      word={word}
+                      interactionMode={interactionMode}
+                      isSelected={selectedWords.has(word.id)}
+                      onWordClick={onWordClick}
+                    />
+                    {index < words.length - 1 &&
+                      words[index + 1]?.status !== WordStatus.LineBreak &&
+                      " "}
+                  </span>
+                );
+              })}
             </div>
           )}
         </div>
