@@ -272,7 +272,8 @@ export async function adminWriteWord(content: string): Promise<string[]> {
 
 /**
  * Admin: insert a word at a specific position.
- * Shifts all words at >= that position up by 1 first.
+ * Shifts all words at >= that position up first.
+ * Wrapped in a transaction for DEFERRABLE UNIQUE on position.
  */
 export async function adminInsertWordAt(
   content: string,
@@ -281,28 +282,30 @@ export async function adminInsertWordAt(
   const words = content.trim().split(/\s+/).filter((w) => w.length > 0);
   if (words.length === 0) return [];
 
-  // Shift existing words to make room for all incoming words
-  await query(
-    `UPDATE words SET position = position + $1 WHERE position >= $2 AND status != $3`,
-    [words.length, position, WordStatus.Pending]
-  );
-
-  const ids: string[] = [];
-  for (let i = 0; i < words.length; i++) {
-    const id = uuidv4();
-    await query(
-      `INSERT INTO words (id, content, status, position) VALUES ($1, $2, $3, $4)`,
-      [id, words[i], WordStatus.Visible, position + i]
+  return transaction(async (client) => {
+    // Shift existing words to make room
+    await client.query(
+      `UPDATE words SET position = position + $1 WHERE position >= $2 AND status != $3`,
+      [words.length, position, WordStatus.Pending]
     );
-    ids.push(id);
-  }
-  return ids;
+
+    const ids: string[] = [];
+    for (let i = 0; i < words.length; i++) {
+      const id = uuidv4();
+      await client.query(
+        `INSERT INTO words (id, content, content_length, status, position) VALUES ($1, $2, $3, $4, $5)`,
+        [id, words[i], words[i].length, WordStatus.Visible, position + i]
+      );
+      ids.push(id);
+    }
+    return ids;
+  });
 }
 
 /**
  * Admin: insert a line break at a specific position.
  * Enforces the 10-word minimum spacing rule between line breaks.
- * Returns the line break word ID or null if the rule is violated.
+ * Wrapped in a transaction for DEFERRABLE UNIQUE on position.
  */
 export async function adminInsertLineBreak(
   position: number
@@ -316,17 +319,19 @@ export async function adminInsertLineBreak(
   );
   if (nearbyBreak) return null; // too close to another line break
 
-  const id = uuidv4();
-  // Shift existing words
-  await query(
-    `UPDATE words SET position = position + 1 WHERE position >= $1 AND status != $2`,
-    [position, WordStatus.Pending]
-  );
-  await query(
-    `INSERT INTO words (id, content, status, position) VALUES ($1, $2, $3, $4)`,
-    [id, "\n", WordStatus.LineBreak, position]
-  );
-  return id;
+  return transaction(async (client) => {
+    const id = uuidv4();
+    // Shift existing words
+    await client.query(
+      `UPDATE words SET position = position + 1 WHERE position >= $1 AND status != $2`,
+      [position, WordStatus.Pending]
+    );
+    await client.query(
+      `INSERT INTO words (id, content, content_length, status, position) VALUES ($1, $2, $3, $4, $5)`,
+      [id, "\n", 0, WordStatus.LineBreak, position]
+    );
+    return id;
+  });
 }
 
 /**
