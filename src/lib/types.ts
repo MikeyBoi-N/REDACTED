@@ -32,6 +32,7 @@ export interface ApiWordResponse {
   readonly id: string;
   readonly position: number;
   readonly content: string | null; // null when redacted or admin_removed
+  readonly content_length: number; // real char count — always available for bar sizing
   readonly flag_count: number;
   readonly status: WordStatus;
 }

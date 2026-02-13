@@ -56,6 +56,41 @@ body {
   animation: slide-in 0.3s ease-out;
 }
 
+/* ── Cart Add Pulse Animation (color gradient only) ───────── */
+@keyframes cart-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.5);
+    border-color: rgb(217, 119, 6);
+  }
+  50% {
+    box-shadow: 0 0 12px 4px rgba(217, 119, 6, 0.25);
+    border-color: rgb(245, 158, 11);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(217, 119, 6, 0);
+    border-color: rgba(82, 82, 82, 1);
+  }
+}
+
+.animate-cart-pulse {
+  animation: cart-pulse 0.8s ease-out;
+}
+
+/* ── Tooltip bounce animation ─────────────────────────────── */
+@keyframes tooltip-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.animate-tooltip-bounce {
+  animation: tooltip-bounce 2s ease-in-out infinite;
+}
+
 /* ── Selection Colors ─────────────────────────────────────── */
 ::selection {
   background: rgba(180, 120, 60, 0.3);

@@ -11,7 +11,7 @@
 
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
@@ -35,6 +35,17 @@ export default function Home() {
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [showWriteTooltip, setShowWriteTooltip] = useState(true);
+
+  // Ref for cart pulse animation
+  const cartPulseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [cartPulse, setCartPulse] = useState(false);
+
+  const triggerCartPulse = useCallback(() => {
+    if (cartPulseTimeoutRef.current) clearTimeout(cartPulseTimeoutRef.current);
+    setCartPulse(true);
+    cartPulseTimeoutRef.current = setTimeout(() => setCartPulse(false), 800);
+  }, []);
 
   // ── Toast helpers ──
   const addToast = useCallback(
@@ -69,7 +80,7 @@ export default function Home() {
           return;
         }
 
-        // Toggle: if already selected, deselect and remove from cart
+        // Toggle
         if (selectedWords.has(wordId)) {
           cart.removeActionByWordId(wordId);
           setSelectedWords((prev) => {
@@ -84,6 +95,7 @@ export default function Home() {
         cart.addRedact(wordId);
         setSelectedWords((prev) => new Set(prev).add(wordId));
         addToast("info", `Added redaction to cart ($2.00)`);
+        triggerCartPulse();
       }
 
       if (activeMode === "uncover") {
@@ -92,7 +104,7 @@ export default function Home() {
           return;
         }
 
-        // Toggle: if already selected, deselect and remove from cart
+        // Toggle
         if (selectedWords.has(wordId)) {
           cart.removeActionByWordId(wordId);
           setSelectedWords((prev) => {
@@ -107,6 +119,7 @@ export default function Home() {
         cart.addUncover(wordId);
         setSelectedWords((prev) => new Set(prev).add(wordId));
         addToast("info", `Added uncover to cart ($2.00)`);
+        triggerCartPulse();
       }
 
       if (activeMode === "flag") {
@@ -117,7 +130,7 @@ export default function Home() {
         handleFlagWord(wordId);
       }
     },
-    [activeMode, story.words, cart, addToast, selectedWords]
+    [activeMode, story.words, cart, addToast, selectedWords, triggerCartPulse]
   );
 
   // ── Flag directly (no Stripe) ──
@@ -146,13 +159,32 @@ export default function Home() {
     [story, addToast]
   );
 
-  // ── Write submission ──
+  // ── Write submission (multi-word support) ──
   const handleWriteSubmit = useCallback(
-    (word: string) => {
-      cart.addWrite(word);
-      addToast("info", `Added "${word}" to cart ($1.00)`);
+    (words: string[]) => {
+      if (words.length === 0) {
+        addToast("error", "Please enter a valid word (max 20 chars each, max 100 words).");
+        return;
+      }
+
+      if (words.length > 100) {
+        addToast("info", "Easy there — max 100 words at a time. Break it up a bit.");
+        return;
+      }
+
+      for (const word of words) {
+        cart.addWrite(word);
+      }
+
+      const totalPrice = words.length * 1;
+      if (words.length === 1) {
+        addToast("info", `Added "${words[0]}" to cart ($1.00)`);
+      } else {
+        addToast("info", `Added ${words.length} words to cart ($${totalPrice.toFixed(2)})`);
+      }
+      triggerCartPulse();
     },
-    [cart, addToast]
+    [cart, addToast, triggerCartPulse]
   );
 
   // ── Checkout: creates PaymentIntent and shows payment form ──
@@ -185,7 +217,7 @@ export default function Home() {
     }
   }, [cart, addToast]);
 
-  // ── Payment success: card charged, webhook will process actions ──
+  // ── Payment success ──
   const handlePaymentSuccess = useCallback(() => {
     addToast("success", "Payment successful! Your edit will appear shortly.");
     setClientSecret(null);
@@ -194,7 +226,6 @@ export default function Home() {
     setSelectedWords(new Set());
     setActiveMode(null);
 
-    // Poll for story update (webhook processes asynchronously)
     const pollInterval = setInterval(() => {
       story.refresh();
     }, 2000);
@@ -224,7 +255,11 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Header activeMode={activeMode} />
+      <Header
+        activeMode={activeMode}
+        cartItemCount={cart.itemCount}
+        onCartOpen={() => setCartOpen(true)}
+      />
 
       {/* Sidebar is fixed-positioned overlay — does not affect layout */}
       <Sidebar />
@@ -242,8 +277,8 @@ export default function Home() {
         activeMode={activeMode}
         onModeChange={handleModeChange}
         onWriteSubmit={handleWriteSubmit}
-        cartItemCount={cart.itemCount}
-        onCartOpen={() => setCartOpen(true)}
+        showWriteTooltip={showWriteTooltip}
+        onDismissTooltip={() => setShowWriteTooltip(false)}
       />
 
       <CartPanel

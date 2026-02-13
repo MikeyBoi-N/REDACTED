@@ -28,6 +28,7 @@ export function stripe(): Stripe {
 
 /**
  * Creates a Stripe PaymentIntent for a checkout cart.
+ * Enables card + Google Pay + Link. Saves card for session reuse.
  *
  * @param amountInDollars - Total cart amount in USD
  * @param metadata - Cart action metadata for webhook processing
@@ -43,6 +44,10 @@ export async function createPaymentIntent(
     amount: amountInCents,
     currency: "usd",
     metadata,
+    // Explicitly set payment methods: card (includes Google Pay/Apple Pay) + Link
+    payment_method_types: ["card", "link"],
+    // Save payment method for session reuse — skips re-entry next time
+    setup_future_usage: "on_session",
   });
 
   if (!intent.client_secret) {

@@ -3,7 +3,7 @@
  *
  * - visible: normal text
  * - flagged: black overlay at 80% opacity (word still 20% readable)
- * - redacted: solid black bar sized to approximate word length (no content available)
+ * - redacted: solid black bar sized to ACTUAL word length (content_length from API)
  * - admin_removed: glitch placeholder
  *
  * Inputs: ApiWordResponse + interaction mode + click handler
@@ -22,37 +22,23 @@ interface WordProps {
   readonly onWordClick: (wordId: string) => void;
 }
 
-/**
- * Estimates the width of a redacted word in `ch` units.
- * Since content is stripped, we use a random-ish but deterministic
- * width based on the word ID to simulate variable word lengths.
- * Range: 3–12 characters wide.
- */
-function estimateRedactedWidth(wordId: string): number {
-  // Deterministic hash from UUID: sum char codes, mod range
-  let hash = 0;
-  for (let i = 0; i < wordId.length; i++) {
-    hash = (hash + wordId.charCodeAt(i)) % 100;
-  }
-  return 3 + Math.floor((hash / 100) * 10); // 3–12 ch
-}
-
 export default function Word({
   word,
   interactionMode,
   isSelected,
   onWordClick,
 }: WordProps) {
-  // ── Redacted: solid black bar sized to approximate word length ──
+  // ── Redacted: solid black bar sized to real word length ──
   if (word.status === WordStatus.Redacted) {
     const isClickable = interactionMode === "uncover";
-    const estimatedWidth = estimateRedactedWidth(word.id);
+    // Use the real content_length from the API — no more guessing
+    const barWidth = Math.max(word.content_length, 1);
     return (
       <span
         className={`inline-block bg-black rounded-sm mx-0.5 align-middle ${
           isClickable ? "cursor-pointer hover:bg-neutral-700" : ""
         } ${isSelected ? "ring-2 ring-blue-500" : ""}`}
-        style={{ width: `${estimatedWidth}ch`, height: "1.1em" }}
+        style={{ width: `${barWidth}ch`, height: "1.1em" }}
         onClick={() => isClickable && onWordClick(word.id)}
         role={isClickable ? "button" : undefined}
         aria-label={isClickable ? "Click to uncover this redacted word" : "Redacted word"}

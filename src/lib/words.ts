@@ -29,6 +29,7 @@ function toApiResponse(row: WordRecord): ApiWordResponse {
     id: row.id,
     position: row.position,
     content: isHidden ? null : row.content,
+    content_length: row.content.length,
     flag_count: row.flag_count,
     status: row.status,
   };

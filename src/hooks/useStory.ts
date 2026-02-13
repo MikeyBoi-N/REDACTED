@@ -1,6 +1,8 @@
 /**
  * Story fetching hook — loads the story from the API.
  *
+ * Returns memoized object to avoid dependency cascade in consumers.
+ *
  * Inputs: None
  * Outputs: Story words array, word count, loading state, refresh function
  * Side Effects: Fetches from /api/words
@@ -8,7 +10,7 @@
 
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { ApiWordResponse } from "@/lib/types";
 
 interface StoryState {
@@ -56,8 +58,16 @@ export function useStory() {
     fetchStory();
   }, [fetchStory]);
 
-  return {
-    ...state,
-    refresh: fetchStory,
-  };
+  // Return a memoized object so consumers don't re-render just because
+  // the hook's internal state object gets recreated.
+  return useMemo(
+    () => ({
+      words: state.words,
+      wordCount: state.wordCount,
+      loading: state.loading,
+      error: state.error,
+      refresh: fetchStory,
+    }),
+    [state.words, state.wordCount, state.loading, state.error, fetchStory]
+  );
 }

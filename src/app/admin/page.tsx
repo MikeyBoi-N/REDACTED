@@ -2,9 +2,8 @@
  * Admin Panel — hidden moderation UI for content management.
  *
  * Accessed via URL: /admin
- * Authenticates with secret token via the admin API.
- * Shows all words with ability to redact, uncover, nuclear remove,
- * and unbound tools: write (free), flag (immediate).
+ * Authenticates with secret token via the admin API (sent as x-admin-token header).
+ * Shows all words with ability to write (free), flag, redact, uncover, and nuclear remove.
  *
  * Inputs: None
  * Outputs: Full admin moderation interface
@@ -24,7 +23,8 @@ interface AdminWord {
   readonly created_at: string;
 }
 
-type AdminAction = "redact" | "uncover" | "remove";
+/** Must match AdminActionType enum from lib/types.ts */
+type AdminAction = "write" | "redact" | "uncover" | "nuclear_remove";
 
 export default function AdminPage() {
   const [token, setToken] = useState("");
@@ -69,23 +69,32 @@ export default function AdminPage() {
     setActionLog((prev) => [message, ...prev]);
   }, []);
 
+  /** Send admin action — token goes in the x-admin-token header. */
   const performAction = useCallback(
-    async (action: AdminAction, wordId: string) => {
+    async (action: AdminAction, wordId?: string, wordContent?: string) => {
       try {
+        const body: Record<string, string> = { action };
+        if (wordId) body.wordId = wordId;
+        if (wordContent) body.wordContent = wordContent;
+
         const res = await fetch("/api/admin", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action, wordId, token }),
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-token": token,
+          },
+          body: JSON.stringify(body),
         });
 
         const data = await res.json();
+        const label = wordId ? `#${wordId.slice(0, 8)}…` : wordContent ?? "";
 
         if (!res.ok) {
-          logAction(`❌ ${action} on #${wordId.slice(0, 8)}… — ${data.error ?? res.status}`);
+          logAction(`❌ ${action} ${label} — ${data.error ?? res.status}`);
           return;
         }
 
-        logAction(`✅ ${action} on #${wordId.slice(0, 8)}… — success`);
+        logAction(`✅ ${action} ${label} — success`);
         fetchWords();
       } catch {
         logAction(`❌ ${action} failed — network error`);
@@ -94,36 +103,18 @@ export default function AdminPage() {
     [token, fetchWords, logAction]
   );
 
-  /** Admin write — uses the admin API (free, bypasses payment). */
+  /** Admin write — free, bypasses payment. */
   const handleAdminWrite = useCallback(async () => {
     const word = writeInput.trim();
     if (!word) return;
 
     setWriting(true);
-    try {
-      const res = await fetch("/api/admin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "write", wordContent: word, token }),
-      });
+    await performAction("write", undefined, word);
+    setWriteInput("");
+    setWriting(false);
+  }, [writeInput, performAction]);
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        logAction(`❌ write "${word}" — ${data.error ?? res.status}`);
-      } else {
-        logAction(`✅ write "${word}" — published`);
-        setWriteInput("");
-        fetchWords();
-      }
-    } catch {
-      logAction(`❌ write failed — network error`);
-    } finally {
-      setWriting(false);
-    }
-  }, [writeInput, token, fetchWords, logAction]);
-
-  /** Admin flag — direct flag (no fingerprint check). */
+  /** Admin flag — direct flag (no fingerprint/duplicate check). */
   const handleAdminFlag = useCallback(
     async (wordId: string) => {
       try {
@@ -285,7 +276,7 @@ export default function AdminPage() {
 
                   {/* Action buttons — all tools, unbound */}
                   <div className="flex gap-1 shrink-0">
-                    {/* Flag — always available for visible/flagged words */}
+                    {/* Flag */}
                     {(word.status === "visible" || word.status === "flagged") && (
                       <button
                         onClick={() => handleAdminFlag(word.id)}
@@ -318,7 +309,7 @@ export default function AdminPage() {
                     {/* Nuclear remove */}
                     {word.status !== "admin_removed" && (
                       <button
-                        onClick={() => performAction("remove", word.id)}
+                        onClick={() => performAction("nuclear_remove", word.id)}
                         className="px-2 py-0.5 bg-neutral-800 hover:bg-red-900 text-neutral-400 hover:text-red-300 text-xs rounded transition-colors"
                         title="Nuclear remove"
                       >

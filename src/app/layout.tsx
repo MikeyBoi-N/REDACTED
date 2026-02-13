@@ -10,7 +10,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "[ REDACTED ] — An Unsanctioned Novel Written by the Internet",
+  title: "[ REDACTED ]",
   description:
     "Pay $1 to add one word to an endless, crowd-authored story. No AI. No algorithm. Just humans, writing one word at a time. A philosophical experiment in collective expression.",
   keywords: [
