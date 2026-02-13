@@ -19,6 +19,13 @@ type ToolMode = "write" | "redact" | "uncover" | "flag" | null;
 
 const MAX_WORDS_PER_SUBMIT = 100;
 
+/**
+ * Character allowlist — matches server-side validation.ts exactly.
+ * Allows: a-z A-Z and approved punctuation. Spaces allowed for multi-word input.
+ * Prevents: 0-9, @, #, ^, (, ), [, ], {, } and other disallowed chars.
+ */
+const ALLOWED_CHAR_PATTERN = /^[a-zA-Z`~!$%&*_\-+=:;"'<,>.?/|\\ ]*$/;
+
 interface ToolbarProps {
   readonly activeMode: ToolMode;
   readonly onModeChange: (mode: ToolMode) => void;
@@ -45,6 +52,16 @@ export default function Toolbar({
       inputRef.current.focus();
     }
   }, [isWriteMode]);
+
+  /** Filters input to only allow valid characters. */
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    if (ALLOWED_CHAR_PATTERN.test(value)) {
+      setWriteInput(value);
+    }
+    // Silently ignore disallowed characters
+  }, []);
+
 
   /** Parse input, splitting on spaces into individual words. */
   const handleWriteSubmit = useCallback(() => {
@@ -134,7 +151,7 @@ export default function Toolbar({
                 ref={inputRef}
                 type="text"
                 value={writeInput}
-                onChange={(e) => setWriteInput(e.target.value)}
+                onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
                 placeholder="Type a word or sentence..."
                 className="bg-transparent text-white text-sm outline-none w-48 sm:w-64 placeholder:text-neutral-500"

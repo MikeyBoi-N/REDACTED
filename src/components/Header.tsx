@@ -3,17 +3,17 @@
  *
  * - Click logo: cycles through cryptic project descriptions (positioned like sidebar)
  * - Easter egg: in "uncover" mode, clicking the logo shows morse code for "REVEALED"
- * - Subtitle displayed next to logo
+ * - Subtitle cycles based on current minute; midnight window shows cryptic message
  * - Cart icon in top-right corner
  *
  * Inputs: activeMode, cartItemCount, onCartOpen
  * Outputs: Rendered header bar + optional sidebar-positioned popup
- * Side Effects: Local popup state
+ * Side Effects: Local popup state, wallclock read for subtitle
  */
 
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 /** Cryptic, slightly poetic descriptions that cycle on each click. */
 const CRYPTIC_MESSAGES = [
@@ -29,6 +29,41 @@ const CRYPTIC_MESSAGES = [
 /** Morse code for "REVEALED" — the easter egg reveal. */
 const MORSE_REDACTED = ".-. . ...- . .- .-.. . -..";
 
+/**
+ * Time-based subtitle phrases — indexed by the last digit of the current minute.
+ * Minute ending in 0 → index 0, ending in 1 → index 1, etc.
+ */
+const SUBTITLE_PHRASES = [
+  "Free speech to those who pay.",
+  "Free speech to those who pay.",
+  "Censorship can't stay hidden forever.",
+  "The pen costs a dollar. The eraser costs two.",
+  "Democracy of ink and coin.",
+  "Your word against theirs — literally.",
+  "What would you write if no one could stop you?",
+  "Every redaction is someone else's opinion.",
+  "The story writes itself. You just fund it.",
+  "Permanence is a privilege, not a right.",
+] as const;
+
+/** Midnight window (00:00–00:09) cryptic message. */
+const MIDNIGHT_MESSAGE = "//SIGNAL LOST — REASSEMBLING — DO NOT LOOK AWAY//";
+
+/** Returns subtitle based on current time. */
+function getSubtitle(): string {
+  const now = new Date();
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+
+  // Midnight window: 00:00 – 00:09
+  if (hours === 0 && minutes < 10) {
+    return MIDNIGHT_MESSAGE;
+  }
+
+  const lastDigit = minutes % 10;
+  return SUBTITLE_PHRASES[lastDigit];
+}
+
 interface HeaderProps {
   readonly activeMode: string | null;
   readonly cartItemCount: number;
@@ -39,6 +74,16 @@ export default function Header({ activeMode, cartItemCount, onCartOpen }: Header
   const [popupIndex, setPopupIndex] = useState<number | null>(null);
   const [cycleCounter, setCycleCounter] = useState(0);
   const [showMorse, setShowMorse] = useState(false);
+  const [subtitle, setSubtitle] = useState("");
+
+  // Set subtitle on mount and refresh every minute
+  useEffect(() => {
+    setSubtitle(getSubtitle());
+    const interval = setInterval(() => {
+      setSubtitle(getSubtitle());
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleHeaderClick = useCallback(() => {
     // Easter egg: in uncover mode, swap header text to morse code
@@ -65,16 +110,18 @@ export default function Header({ activeMode, cartItemCount, onCartOpen }: Header
     <>
       <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-3 bg-neutral-950 border-b border-neutral-800">
         {/* Logo + subtitle */}
-        <div className="flex items-baseline gap-3">
+        <div className="flex items-center gap-6">
           <h1
             className="text-xl font-bold tracking-tight text-white font-mono cursor-pointer hover:text-amber-400 transition-colors select-none"
             onClick={handleHeaderClick}
           >
             {showMorse ? MORSE_REDACTED : "[ REDACTED ]"}
           </h1>
-          <span className="text-[11px] text-neutral-500 hidden sm:inline tracking-wide">
-            An Unsanctioned Novel Written by the Internet
-          </span>
+          {subtitle && (
+            <span className="text-sm text-neutral-500 hidden sm:inline tracking-wide italic">
+              {subtitle}
+            </span>
+          )}
         </div>
 
         {/* Cart icon — top right */}

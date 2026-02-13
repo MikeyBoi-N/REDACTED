@@ -11,7 +11,7 @@
 
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
@@ -46,6 +46,12 @@ export default function Home() {
     setCartPulse(true);
     cartPulseTimeoutRef.current = setTimeout(() => setCartPulse(false), 800);
   }, []);
+
+  // Stable ref for story.refresh — avoids dependency cascade in callbacks
+  const storyRefreshRef = useRef(story.refresh);
+  useEffect(() => {
+    storyRefreshRef.current = story.refresh;
+  }, [story.refresh]);
 
   // ── Toast helpers ──
   const addToast = useCallback(
@@ -226,11 +232,12 @@ export default function Home() {
     setSelectedWords(new Set());
     setActiveMode(null);
 
-    const pollInterval = setInterval(() => {
-      story.refresh();
-    }, 2000);
-    setTimeout(() => clearInterval(pollInterval), 15000);
-  }, [cart, addToast, story]);
+    // Retry 3 times with increasing delay to pick up webhook-processed changes.
+    // Uses a ref so this callback never depends on the `story` object.
+    setTimeout(() => storyRefreshRef.current(), 2000);
+    setTimeout(() => storyRefreshRef.current(), 5000);
+    setTimeout(() => storyRefreshRef.current(), 10000);
+  }, [cart, addToast]);
 
   // ── Payment error ──
   const handlePaymentError = useCallback(
