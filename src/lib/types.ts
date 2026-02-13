@@ -10,6 +10,7 @@
 export enum WordStatus {
   Pending = "pending",
   Visible = "visible",
+  Protected = "protected",
   Flagged = "flagged",
   Redacted = "redacted",
   AdminRedacted = "admin_redacted",
@@ -87,6 +88,8 @@ export enum AdminActionType {
   Flag = "flag",
   Unflag = "unflag",
   Delete = "delete",
+  Protect = "protect",
+  Unprotect = "unprotect",
 }
 
 export interface AdminActionRequest {

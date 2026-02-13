@@ -109,7 +109,12 @@ export async function flagWord(
   );
 
   if (!word) return null;
-  if (word.status === WordStatus.Redacted || word.status === WordStatus.AdminRemoved) {
+  if (
+    word.status === WordStatus.Redacted ||
+    word.status === WordStatus.AdminRemoved ||
+    word.status === WordStatus.AdminRedacted ||
+    word.status === WordStatus.Protected
+  ) {
     return null;
   }
   if (word.flag_count >= VALIDATION.MAX_FLAG_COUNT) {
@@ -164,8 +169,13 @@ export async function redactWord(wordId: string): Promise<boolean> {
   );
 
   if (!word) return false;
-  if (word.status === WordStatus.Redacted || word.status === WordStatus.AdminRemoved) {
-    return false; // already redacted — stale action
+  if (
+    word.status === WordStatus.Redacted ||
+    word.status === WordStatus.AdminRemoved ||
+    word.status === WordStatus.AdminRedacted ||
+    word.status === WordStatus.Protected
+  ) {
+    return false;
   }
 
   await query(
@@ -243,14 +253,21 @@ export async function adminRemoveWord(wordId: string): Promise<boolean> {
  * Admin: write a word for free (bypasses payment).
  * Position is assigned atomically by the database.
  */
-export async function adminWriteWord(content: string): Promise<string> {
-  const id = uuidv4();
-  await query(
-    `INSERT INTO words (id, content, status, position)
-     VALUES ($1, $2, $3, nextval('words_position_seq'))`,
-    [id, content, WordStatus.Visible]
-  );
-  return id;
+export async function adminWriteWord(content: string): Promise<string[]> {
+  const words = content.trim().split(/\s+/).filter((w) => w.length > 0);
+  if (words.length === 0) return [];
+
+  const ids: string[] = [];
+  for (const word of words) {
+    const id = uuidv4();
+    await query(
+      `INSERT INTO words (id, content, status, position)
+       VALUES ($1, $2, $3, nextval('words_position_seq'))`,
+      [id, word, WordStatus.Visible]
+    );
+    ids.push(id);
+  }
+  return ids;
 }
 
 /**
@@ -260,18 +277,26 @@ export async function adminWriteWord(content: string): Promise<string> {
 export async function adminInsertWordAt(
   content: string,
   position: number
-): Promise<string> {
-  const id = uuidv4();
-  // Shift existing words at or after this position
+): Promise<string[]> {
+  const words = content.trim().split(/\s+/).filter((w) => w.length > 0);
+  if (words.length === 0) return [];
+
+  // Shift existing words to make room for all incoming words
   await query(
-    `UPDATE words SET position = position + 1 WHERE position >= $1 AND status != $2`,
-    [position, WordStatus.Pending]
+    `UPDATE words SET position = position + $1 WHERE position >= $2 AND status != $3`,
+    [words.length, position, WordStatus.Pending]
   );
-  await query(
-    `INSERT INTO words (id, content, status, position) VALUES ($1, $2, $3, $4)`,
-    [id, content, WordStatus.Visible, position]
-  );
-  return id;
+
+  const ids: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const id = uuidv4();
+    await query(
+      `INSERT INTO words (id, content, status, position) VALUES ($1, $2, $3, $4)`,
+      [id, words[i], WordStatus.Visible, position + i]
+    );
+    ids.push(id);
+  }
+  return ids;
 }
 
 /**
@@ -395,6 +420,48 @@ export async function adminRestoreWord(wordId: string): Promise<boolean> {
 
   await query(
     `UPDATE words SET status = $1, flag_count = 0 WHERE id = $2`,
+    [WordStatus.Visible, wordId]
+  );
+  return true;
+}
+
+/**
+ * Admin: protect a word from user redaction and flagging.
+ * Word remains visible but cannot be redacted, flagged, or otherwise modified by users.
+ */
+export async function adminProtectWord(wordId: string): Promise<boolean> {
+  const word = await queryOne<WordRecord>(
+    `SELECT * FROM words WHERE id = $1`,
+    [wordId]
+  );
+  if (!word) return false;
+  if (
+    word.status !== WordStatus.Visible &&
+    word.status !== WordStatus.Flagged
+  ) {
+    return false;
+  }
+
+  await query(
+    `UPDATE words SET status = $1, flag_count = 0 WHERE id = $2`,
+    [WordStatus.Protected, wordId]
+  );
+  return true;
+}
+
+/**
+ * Admin: remove protection from a word, returning it to visible status.
+ */
+export async function adminUnprotectWord(wordId: string): Promise<boolean> {
+  const word = await queryOne<WordRecord>(
+    `SELECT * FROM words WHERE id = $1`,
+    [wordId]
+  );
+  if (!word) return false;
+  if (word.status !== WordStatus.Protected) return false;
+
+  await query(
+    `UPDATE words SET status = $1 WHERE id = $2`,
     [WordStatus.Visible, wordId]
   );
   return true;

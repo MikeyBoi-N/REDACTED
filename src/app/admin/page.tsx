@@ -4,8 +4,9 @@
  * Features:
  * - Write (free, unrestricted characters, append or insert at position)
  * - Insert line breaks (enforced 10-word minimum spacing)
- * - Mass operations: checkbox selection + bulk redact/admin_redact/nuclear/delete/flag/unflag
- * - Individual actions: flag+/−, redact, admin lock, uncover, nuclear (with confirm), restore, delete
+ * - Mass operations: checkbox selection + bulk actions
+ * - Individual actions: flag, redact, admin lock, protect, uncover, nuclear, restore, delete
+ * - Fuzzy search, sort, filter, CSV download
  * - Action log
  *
  * Inputs: None
@@ -38,7 +39,38 @@ type AdminAction =
   | "restore"
   | "flag"
   | "unflag"
-  | "delete";
+  | "delete"
+  | "protect"
+  | "unprotect";
+
+type SortField = "position" | "content" | "status" | "length" | "flags" | "created";
+type SortDir = "asc" | "desc";
+
+const STATUS_OPTIONS = [
+  "all",
+  "visible",
+  "protected",
+  "flagged",
+  "redacted",
+  "admin_redacted",
+  "admin_removed",
+  "linebreak",
+] as const;
+
+/**
+ * Simple fuzzy match — checks if all characters of the query appear
+ * in order within the target string. O(n) per comparison.
+ */
+function fuzzyMatch(target: string, query: string): boolean {
+  if (query.length === 0) return true;
+  const t = target.toLowerCase();
+  const q = query.toLowerCase();
+  let qi = 0;
+  for (let i = 0; i < t.length && qi < q.length; i++) {
+    if (t[i] === q[qi]) qi++;
+  }
+  return qi === q.length;
+}
 
 export default function AdminPage() {
   const [token, setToken] = useState("");
@@ -55,6 +87,14 @@ export default function AdminPage() {
 
   // Mass selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Search / Sort / Filter
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortField, setSortField] = useState<SortField>("position");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [minLength, setMinLength] = useState("");
+  const [maxLength, setMaxLength] = useState("");
 
   const fetchWords = useCallback(async () => {
     setLoading(true);
@@ -73,6 +113,38 @@ export default function AdminPage() {
   useEffect(() => {
     if (authenticated) fetchWords();
   }, [authenticated, fetchWords]);
+
+  // ── Filtered + sorted words (memoized) ──
+  const filteredWords = useMemo(() => {
+    const minLen = minLength ? parseInt(minLength, 10) : 0;
+    const maxLen = maxLength ? parseInt(maxLength, 10) : Infinity;
+
+    const filtered = words.filter((w) => {
+      // Status filter
+      if (statusFilter !== "all" && w.status !== statusFilter) return false;
+      // Length filter
+      if (w.content_length < minLen || w.content_length > maxLen) return false;
+      // Fuzzy search
+      if (searchQuery && !fuzzyMatch(w.content ?? "", searchQuery)) return false;
+      return true;
+    });
+
+    // Sort
+    filtered.sort((a, b) => {
+      let cmp = 0;
+      switch (sortField) {
+        case "position": cmp = a.position - b.position; break;
+        case "content": cmp = (a.content ?? "").localeCompare(b.content ?? ""); break;
+        case "status": cmp = a.status.localeCompare(b.status); break;
+        case "length": cmp = a.content_length - b.content_length; break;
+        case "flags": cmp = a.flag_count - b.flag_count; break;
+        case "created": cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime(); break;
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+
+    return filtered;
+  }, [words, searchQuery, sortField, sortDir, statusFilter, minLength, maxLength]);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,7 +185,6 @@ export default function AdminPage() {
     [callAdmin, logAction, fetchWords]
   );
 
-  // ── Nuclear confirm ──
   const handleNuclearRemove = useCallback(
     (wordId: string, content: string | null) => {
       if (!window.confirm(`Are you sure you want to NUCLEAR REMOVE "${content ?? "[hidden]"}"?`)) return;
@@ -122,7 +193,6 @@ export default function AdminPage() {
     [performAction]
   );
 
-  // ── Delete confirm ──
   const handleDelete = useCallback(
     (wordId: string, content: string | null) => {
       if (!window.confirm(`Permanently DELETE "${content ?? "[hidden]"}" from the database?`)) return;
@@ -131,12 +201,10 @@ export default function AdminPage() {
     [performAction]
   );
 
-  // ── Write / Insert ──
   const handleWrite = useCallback(async () => {
     const text = writeInput.trim();
     if (!text) return;
     setWriting(true);
-
     const pos = parseInt(insertPosition, 10);
     if (insertPosition && !isNaN(pos)) {
       await performAction("insert_at", undefined, { wordContent: text, position: pos });
@@ -148,7 +216,6 @@ export default function AdminPage() {
     setWriting(false);
   }, [writeInput, insertPosition, performAction]);
 
-  // ── Line break insert ──
   const handleInsertLineBreak = useCallback(async () => {
     const pos = parseInt(insertPosition, 10);
     if (isNaN(pos)) {
@@ -168,9 +235,9 @@ export default function AdminPage() {
     });
   }, []);
 
-  const selectAll = useCallback(() => {
-    setSelectedIds(new Set(words.map((w) => w.id)));
-  }, [words]);
+  const selectAllFiltered = useCallback(() => {
+    setSelectedIds(new Set(filteredWords.map((w) => w.id)));
+  }, [filteredWords]);
 
   const deselectAll = useCallback(() => {
     setSelectedIds(new Set());
@@ -178,16 +245,12 @@ export default function AdminPage() {
 
   const selectedCount = selectedIds.size;
 
-  // ── Batch operation ──
   const batchAction = useCallback(
     async (action: AdminAction) => {
       if (selectedCount === 0) return;
-
-      // Destructive batch actions need confirmation
       if (action === "nuclear_remove" || action === "delete") {
         if (!window.confirm(`${action.toUpperCase()} ${selectedCount} word(s)?`)) return;
       }
-
       for (const id of selectedIds) {
         await performAction(action, id);
       }
@@ -195,6 +258,37 @@ export default function AdminPage() {
     },
     [selectedIds, selectedCount, performAction]
   );
+
+  // ── CSV Export ──
+  const downloadCSV = useCallback(() => {
+    const headers = ["id", "position", "content", "content_length", "status", "flag_count", "created_at"];
+    const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const rows = filteredWords.map((w) =>
+      [w.id, w.position, w.content ?? "", w.content_length, w.status, w.flag_count, w.created_at]
+        .map(String)
+        .map(escape)
+        .join(",")
+    );
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `words_export_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    logAction(`📥 Exported ${filteredWords.length} words to CSV`);
+  }, [filteredWords, logAction]);
+
+  // ── Sort toggle ──
+  const toggleSort = useCallback((field: SortField) => {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  }, [sortField]);
 
   // ── Login ──
   if (!authenticated) {
@@ -226,7 +320,12 @@ export default function AdminPage() {
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-xl font-mono font-bold">[ ADMIN PANEL ]</h1>
           <div className="flex items-center gap-3">
-            <span className="text-neutral-500 text-xs font-mono">{words.length} words</span>
+            <span className="text-neutral-500 text-xs font-mono">
+              {filteredWords.length}/{words.length} words
+            </span>
+            <button onClick={downloadCSV} className="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 rounded text-xs transition-colors" title="Download filtered words as CSV">
+              📥 CSV
+            </button>
             <button onClick={fetchWords} className="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 rounded text-xs transition-colors">
               Refresh
             </button>
@@ -245,8 +344,8 @@ export default function AdminPage() {
             value={writeInput}
             onChange={(e) => setWriteInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleWrite()}
-            placeholder="Any text..."
-            maxLength={100}
+            placeholder="Any text (each word = separate entry)..."
+            maxLength={500}
             className="flex-1 min-w-[120px] bg-transparent text-white text-sm outline-none placeholder:text-neutral-500"
           />
           <input
@@ -272,6 +371,75 @@ export default function AdminPage() {
           </button>
         </div>
 
+        {/* Search / Filter / Sort bar */}
+        <div className="mb-4 flex flex-wrap items-center gap-2 px-4 py-2.5 bg-neutral-900 rounded-lg border border-neutral-800">
+          {/* Fuzzy search */}
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="🔍 Search words..."
+            className="flex-1 min-w-[140px] bg-neutral-800 text-white text-xs px-2.5 py-1.5 rounded border border-neutral-700 outline-none focus:border-amber-600 placeholder:text-neutral-500"
+          />
+          {/* Status filter */}
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="bg-neutral-800 text-white text-xs px-2 py-1.5 rounded border border-neutral-700 outline-none focus:border-amber-600"
+          >
+            {STATUS_OPTIONS.map((s) => (
+              <option key={s} value={s}>
+                {s === "all" ? "All statuses" : s}
+              </option>
+            ))}
+          </select>
+          {/* Length range */}
+          <div className="flex items-center gap-1">
+            <input
+              type="text"
+              value={minLength}
+              onChange={(e) => setMinLength(e.target.value.replace(/\D/g, ""))}
+              placeholder="Min len"
+              className="w-16 bg-neutral-800 text-white text-xs px-2 py-1.5 rounded border border-neutral-700 outline-none focus:border-amber-600 placeholder:text-neutral-500"
+            />
+            <span className="text-neutral-600 text-xs">–</span>
+            <input
+              type="text"
+              value={maxLength}
+              onChange={(e) => setMaxLength(e.target.value.replace(/\D/g, ""))}
+              placeholder="Max len"
+              className="w-16 bg-neutral-800 text-white text-xs px-2 py-1.5 rounded border border-neutral-700 outline-none focus:border-amber-600 placeholder:text-neutral-500"
+            />
+          </div>
+          {/* Sort */}
+          <div className="flex items-center gap-1">
+            <span className="text-neutral-500 text-xs">Sort:</span>
+            {(["position", "content", "length", "flags", "status", "created"] as SortField[]).map((f) => (
+              <button
+                key={f}
+                onClick={() => toggleSort(f)}
+                className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
+                  sortField === f
+                    ? "bg-amber-900/50 text-amber-300"
+                    : "bg-neutral-800 text-neutral-500 hover:text-white"
+                }`}
+              >
+                {f === "position" ? "#" : f === "content" ? "Aa" : f === "length" ? "Len" : f === "flags" ? "🚩" : f === "created" ? "Date" : f}
+                {sortField === f && (sortDir === "asc" ? " ↑" : " ↓")}
+              </button>
+            ))}
+          </div>
+          {/* Clear filters */}
+          {(searchQuery || statusFilter !== "all" || minLength || maxLength) && (
+            <button
+              onClick={() => { setSearchQuery(""); setStatusFilter("all"); setMinLength(""); setMaxLength(""); }}
+              className="text-neutral-500 text-xs hover:text-white"
+            >
+              ✕ Clear
+            </button>
+          )}
+        </div>
+
         {/* Batch actions bar */}
         {selectedCount > 0 && (
           <div className="mb-4 flex flex-wrap items-center gap-2 px-4 py-2 bg-neutral-900 rounded-lg border border-blue-900/40">
@@ -283,6 +451,7 @@ export default function AdminPage() {
             <button onClick={() => batchAction("nuclear_remove")} className="px-2 py-0.5 bg-neutral-800 hover:bg-red-900 text-xs rounded text-red-300">☢ Nuclear</button>
             <button onClick={() => batchAction("flag")} className="px-2 py-0.5 bg-neutral-800 hover:bg-amber-900 text-xs rounded text-amber-300">🚩+ Flag</button>
             <button onClick={() => batchAction("unflag")} className="px-2 py-0.5 bg-neutral-800 hover:bg-green-900 text-xs rounded text-green-300">🚩− Unflag</button>
+            <button onClick={() => batchAction("protect")} className="px-2 py-0.5 bg-neutral-800 hover:bg-teal-900 text-xs rounded text-teal-300">🛡 Protect</button>
             <button onClick={() => batchAction("delete")} className="px-2 py-0.5 bg-red-900 hover:bg-red-800 text-xs rounded text-red-200">🗑 Delete</button>
           </div>
         )}
@@ -294,19 +463,19 @@ export default function AdminPage() {
             <div className="flex items-center gap-2 px-3 py-1 text-neutral-500 text-xs">
               <input
                 type="checkbox"
-                checked={selectedCount === words.length && words.length > 0}
-                onChange={() => (selectedCount === words.length ? deselectAll() : selectAll())}
+                checked={selectedCount === filteredWords.length && filteredWords.length > 0}
+                onChange={() => (selectedCount === filteredWords.length ? deselectAll() : selectAllFiltered())}
                 className="accent-amber-600"
               />
-              <span>Select all</span>
+              <span>Select all ({filteredWords.length})</span>
             </div>
 
             {loading ? (
               <p className="text-neutral-500 animate-pulse px-3">Loading...</p>
-            ) : words.length === 0 ? (
-              <p className="text-neutral-500 px-3">No words yet.</p>
+            ) : filteredWords.length === 0 ? (
+              <p className="text-neutral-500 px-3">{words.length === 0 ? "No words yet." : "No matches."}</p>
             ) : (
-              words.map((word) => (
+              filteredWords.map((word) => (
                 <div
                   key={word.id}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded border transition-colors ${
@@ -339,10 +508,17 @@ export default function AdminPage() {
                         ? "text-red-500 line-through"
                         : word.status === "flagged"
                         ? "text-amber-400"
+                        : word.status === "protected"
+                        ? "text-teal-300"
                         : "text-white"
                     }`}
                   >
                     {word.status === "linebreak" ? "¶ [line break]" : word.content ?? "[hidden]"}
+                  </span>
+
+                  {/* Length */}
+                  <span className="text-neutral-600 text-[10px] font-mono w-6 text-right shrink-0">
+                    {word.content_length}
                   </span>
 
                   {/* Status badge */}
@@ -350,6 +526,8 @@ export default function AdminPage() {
                     className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 ${
                       word.status === "visible"
                         ? "bg-green-950 text-green-400"
+                        : word.status === "protected"
+                        ? "bg-teal-950 text-teal-400"
                         : word.status === "linebreak"
                         ? "bg-cyan-950 text-cyan-400"
                         : word.status === "flagged"
@@ -361,7 +539,7 @@ export default function AdminPage() {
                         : "bg-red-950 text-red-400"
                     }`}
                   >
-                    {word.status === "admin_redacted" ? "🔒" : word.status === "linebreak" ? "¶" : word.status}
+                    {word.status === "admin_redacted" ? "🔒" : word.status === "linebreak" ? "¶" : word.status === "protected" ? "🛡" : word.status}
                   </span>
 
                   {/* Flag count */}
@@ -372,7 +550,7 @@ export default function AdminPage() {
                   {/* Individual actions */}
                   <div className="flex gap-1 shrink-0">
                     {/* Flag/unflag */}
-                    {word.status !== "admin_removed" && word.status !== "admin_redacted" && word.status !== "linebreak" && (
+                    {word.status !== "admin_removed" && word.status !== "admin_redacted" && word.status !== "linebreak" && word.status !== "protected" && (
                       <>
                         <button onClick={() => performAction("flag", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-amber-900 text-neutral-400 hover:text-amber-300 text-[10px] rounded" title="Flag">🚩+</button>
                         {word.flag_count > 0 && (
@@ -399,6 +577,13 @@ export default function AdminPage() {
                     {/* Restore */}
                     {word.status === "admin_removed" && (
                       <button onClick={() => performAction("restore", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-emerald-900 text-neutral-400 hover:text-emerald-300 text-[10px] rounded" title="Restore">♻</button>
+                    )}
+                    {/* Protect / Unprotect */}
+                    {(word.status === "visible" || word.status === "flagged") && (
+                      <button onClick={() => performAction("protect", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-teal-900 text-neutral-400 hover:text-teal-300 text-[10px] rounded" title="Protect from redaction">🛡</button>
+                    )}
+                    {word.status === "protected" && (
+                      <button onClick={() => performAction("unprotect", word.id)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-teal-900 text-teal-400 hover:text-teal-200 text-[10px] rounded" title="Remove protection">🛡⁻</button>
                     )}
                     {/* Delete (hard) */}
                     <button onClick={() => handleDelete(word.id, word.content)} className="px-1.5 py-0.5 bg-neutral-800 hover:bg-red-900 text-neutral-400 hover:text-red-300 text-[10px] rounded" title="Delete from DB">🗑</button>

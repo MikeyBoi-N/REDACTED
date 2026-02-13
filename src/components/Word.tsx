@@ -148,6 +148,11 @@ const Word = memo(function Word({
     );
   }
 
+  // ── Protected: looks normal but immune to user redact/flag ──
+  if (word.status === WordStatus.Protected) {
+    return <span className="inline">{word.content}</span>;
+  }
+
   // ── Visible: normal text ──
   const isClickable =
     interactionMode === "redact" || interactionMode === "flag";

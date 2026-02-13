@@ -1,12 +1,9 @@
 /**
  * Admin API route — POST for admin actions.
  *
- * All requests from non-whitelisted IPs return generic 404.
- * Requires both IP allowlist + secret token header.
- *
  * Inputs: Admin action request body + auth headers
  * Outputs: Action result
- * Side Effects: Writes/redacts/removes/flags/restores/deletes words
+ * Side Effects: Writes/redacts/removes/flags/restores/deletes/protects words
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -23,6 +20,8 @@ import {
   adminRedactWord,
   adminRestoreWord,
   adminDeleteWord,
+  adminProtectWord,
+  adminUnprotectWord,
 } from "@/lib/words";
 import { AdminActionRequest, AdminActionType } from "@/lib/types";
 
@@ -43,22 +42,19 @@ export async function POST(request: NextRequest) {
         if (!body.wordContent) {
           return NextResponse.json({ error: "wordContent required." }, { status: 400 });
         }
-        if (body.wordContent.length < 1 || body.wordContent.length > 100) {
-          return NextResponse.json({ error: "Word must be 1–100 chars." }, { status: 400 });
+        if (body.wordContent.length < 1 || body.wordContent.length > 500) {
+          return NextResponse.json({ error: "Content must be 1–500 chars." }, { status: 400 });
         }
-        const wordId = await adminWriteWord(body.wordContent);
-        return NextResponse.json({ success: true, wordId });
+        const wordIds = await adminWriteWord(body.wordContent);
+        return NextResponse.json({ success: true, wordIds, count: wordIds.length });
       }
 
       case AdminActionType.InsertAt: {
         if (!body.wordContent || body.position == null) {
-          return NextResponse.json(
-            { error: "wordContent and position required." },
-            { status: 400 }
-          );
+          return NextResponse.json({ error: "wordContent and position required." }, { status: 400 });
         }
-        const wordId = await adminInsertWordAt(body.wordContent, body.position);
-        return NextResponse.json({ success: true, wordId });
+        const wordIds = await adminInsertWordAt(body.wordContent, body.position);
+        return NextResponse.json({ success: true, wordIds, count: wordIds.length });
       }
 
       case AdminActionType.InsertLineBreak: {
@@ -76,59 +72,53 @@ export async function POST(request: NextRequest) {
       }
 
       case AdminActionType.Redact: {
-        if (!body.wordId) {
-          return NextResponse.json({ error: "wordId required." }, { status: 400 });
-        }
+        if (!body.wordId) return NextResponse.json({ error: "wordId required." }, { status: 400 });
         return NextResponse.json({ success: await redactWord(body.wordId) });
       }
 
       case AdminActionType.AdminRedact: {
-        if (!body.wordId) {
-          return NextResponse.json({ error: "wordId required." }, { status: 400 });
-        }
+        if (!body.wordId) return NextResponse.json({ error: "wordId required." }, { status: 400 });
         return NextResponse.json({ success: await adminRedactWord(body.wordId) });
       }
 
       case AdminActionType.Uncover: {
-        if (!body.wordId) {
-          return NextResponse.json({ error: "wordId required." }, { status: 400 });
-        }
+        if (!body.wordId) return NextResponse.json({ error: "wordId required." }, { status: 400 });
         return NextResponse.json({ success: await adminUncoverWord(body.wordId) });
       }
 
       case AdminActionType.NuclearRemove: {
-        if (!body.wordId) {
-          return NextResponse.json({ error: "wordId required." }, { status: 400 });
-        }
+        if (!body.wordId) return NextResponse.json({ error: "wordId required." }, { status: 400 });
         return NextResponse.json({ success: await adminRemoveWord(body.wordId) });
       }
 
       case AdminActionType.Restore: {
-        if (!body.wordId) {
-          return NextResponse.json({ error: "wordId required." }, { status: 400 });
-        }
+        if (!body.wordId) return NextResponse.json({ error: "wordId required." }, { status: 400 });
         return NextResponse.json({ success: await adminRestoreWord(body.wordId) });
       }
 
       case AdminActionType.Flag: {
-        if (!body.wordId) {
-          return NextResponse.json({ error: "wordId required." }, { status: 400 });
-        }
+        if (!body.wordId) return NextResponse.json({ error: "wordId required." }, { status: 400 });
         return NextResponse.json({ success: await adminFlagWord(body.wordId) });
       }
 
       case AdminActionType.Unflag: {
-        if (!body.wordId) {
-          return NextResponse.json({ error: "wordId required." }, { status: 400 });
-        }
+        if (!body.wordId) return NextResponse.json({ error: "wordId required." }, { status: 400 });
         return NextResponse.json({ success: await adminUnflagWord(body.wordId) });
       }
 
       case AdminActionType.Delete: {
-        if (!body.wordId) {
-          return NextResponse.json({ error: "wordId required." }, { status: 400 });
-        }
+        if (!body.wordId) return NextResponse.json({ error: "wordId required." }, { status: 400 });
         return NextResponse.json({ success: await adminDeleteWord(body.wordId) });
+      }
+
+      case AdminActionType.Protect: {
+        if (!body.wordId) return NextResponse.json({ error: "wordId required." }, { status: 400 });
+        return NextResponse.json({ success: await adminProtectWord(body.wordId) });
+      }
+
+      case AdminActionType.Unprotect: {
+        if (!body.wordId) return NextResponse.json({ error: "wordId required." }, { status: 400 });
+        return NextResponse.json({ success: await adminUnprotectWord(body.wordId) });
       }
 
       default:
@@ -136,9 +126,6 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     console.error("Admin action error:", error);
-    return NextResponse.json(
-      { error: "Failed to process admin action." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to process admin action." }, { status: 500 });
   }
 }
