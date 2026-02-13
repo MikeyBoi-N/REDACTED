@@ -115,7 +115,7 @@ export default function Header({ activeMode, cartItemCount, onCartOpen }: Header
             className="text-xl font-bold tracking-tight text-white font-mono cursor-pointer hover:text-amber-400 transition-colors select-none"
             onClick={handleHeaderClick}
           >
-            {showMorse ? MORSE_REDACTED : "[ REDACTED ]"}
+            {showMorse ? MORSE_REDACTED : "[ UNREDACTED ]"}
           </h1>
           {subtitle && (
             <span className="text-sm text-neutral-500 hidden sm:inline tracking-wide italic">

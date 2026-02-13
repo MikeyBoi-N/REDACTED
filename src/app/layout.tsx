@@ -10,7 +10,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "[ REDACTED ]",
+  title: "[ UNREDACTED ]",
   description:
     "Pay $1 to add one word to an endless, crowd-authored story. No AI. No algorithm. Just humans, writing one word at a time. A philosophical experiment in collective expression.",
   keywords: [
@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     icon: "/favicon.png",
   },
   openGraph: {
-    title: "[ REDACTED ]",
+    title: "[ UNREDACTED ]",
     description: "An unsanctioned novel being written by the internet.",
     type: "website",
   },
