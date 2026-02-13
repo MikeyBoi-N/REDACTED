@@ -21,6 +21,9 @@ export const metadata: Metadata = {
     "collective unconscious",
     "social experiment",
   ],
+  icons: {
+    icon: "/favicon.png",
+  },
   openGraph: {
     title: "[ REDACTED ]",
     description: "An unsanctioned novel being written by the internet.",

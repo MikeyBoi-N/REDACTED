@@ -1,6 +1,6 @@
 /**
  * StoryView component — the infinite scrolling story document.
- * Renders the story as a continuous parchment-colored panel.
+ * Renders the story as a continuous parchment-colored panel, always centered.
  *
  * Inputs: words array, interaction mode, selected words, word click handler
  * Outputs: Rendered story document
@@ -30,11 +30,11 @@ export default function StoryView({
   onWordClick,
 }: StoryViewProps) {
   return (
-    <div className="flex-1 flex flex-col min-h-0 pt-16 pb-24 px-4 md:px-8">
-      {/* Story document — parchment paper look */}
-      <div className="flex-1 overflow-y-auto">
+    <div className="flex-1 flex justify-center min-h-0 pt-16 pb-24 px-4 md:px-8">
+      {/* Story document — parchment paper look, always centered */}
+      <div className="flex-1 max-w-3xl overflow-y-auto">
         <div
-          className="max-w-3xl mx-auto min-h-full p-8 md:p-12 rounded-sm shadow-2xl"
+          className="min-h-full p-8 md:p-12 rounded-sm shadow-2xl"
           style={{ backgroundColor: "#f0e6d3" }}
         >
           {loading ? (

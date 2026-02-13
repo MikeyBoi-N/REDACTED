@@ -1,5 +1,6 @@
 /**
  * Toast notification component — dismissable success/failure toasts.
+ * Z-index set below the cart panel (z-40 vs cart's z-50).
  *
  * Inputs: Toast messages array with type and text
  * Outputs: Rendered toast stack
@@ -8,7 +9,7 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useEffect } from "react";
 
 export interface ToastMessage {
   readonly id: string;
@@ -23,7 +24,7 @@ interface ToastProps {
 
 export default function Toast({ toasts, onDismiss }: ToastProps) {
   return (
-    <div className="fixed top-16 right-4 z-50 flex flex-col gap-2 max-w-sm">
+    <div className="fixed top-16 right-4 z-40 flex flex-col gap-2 max-w-sm">
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
       ))}

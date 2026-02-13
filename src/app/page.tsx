@@ -1,7 +1,7 @@
 /**
  * Main story page — composes all components.
  *
- * Layout: Header (top) + Sidebar (left) + StoryView (center) + Toolbar (bottom)
+ * Layout: Header (top, fixed) + Sidebar (overlay, fixed) + StoryView (center) + Toolbar (bottom)
  * This is the single entry point for the application.
  *
  * Inputs: None (fetches data via hooks)
@@ -55,7 +55,7 @@ export default function Home() {
     setSelectedWords(new Set());
   }, []);
 
-  // ── Word interactions ──
+  // ── Word interactions (toggleable selections) ──
   const handleWordClick = useCallback(
     (wordId: string) => {
       if (!activeMode || activeMode === "write") return;
@@ -68,6 +68,19 @@ export default function Home() {
           addToast("error", "This word is already redacted.");
           return;
         }
+
+        // Toggle: if already selected, deselect and remove from cart
+        if (selectedWords.has(wordId)) {
+          cart.removeActionByWordId(wordId);
+          setSelectedWords((prev) => {
+            const next = new Set(prev);
+            next.delete(wordId);
+            return next;
+          });
+          addToast("info", "Removed redaction from cart.");
+          return;
+        }
+
         cart.addRedact(wordId);
         setSelectedWords((prev) => new Set(prev).add(wordId));
         addToast("info", `Added redaction to cart ($2.00)`);
@@ -78,6 +91,19 @@ export default function Home() {
           addToast("error", "Only redacted words can be uncovered.");
           return;
         }
+
+        // Toggle: if already selected, deselect and remove from cart
+        if (selectedWords.has(wordId)) {
+          cart.removeActionByWordId(wordId);
+          setSelectedWords((prev) => {
+            const next = new Set(prev);
+            next.delete(wordId);
+            return next;
+          });
+          addToast("info", "Removed uncover from cart.");
+          return;
+        }
+
         cart.addUncover(wordId);
         setSelectedWords((prev) => new Set(prev).add(wordId));
         addToast("info", `Added uncover to cart ($2.00)`);
@@ -91,7 +117,7 @@ export default function Home() {
         handleFlagWord(wordId);
       }
     },
-    [activeMode, story.words, cart, addToast]
+    [activeMode, story.words, cart, addToast, selectedWords]
   );
 
   // ── Flag directly (no Stripe) ──
@@ -151,7 +177,6 @@ export default function Home() {
       }
 
       const data = await response.json();
-      // Show the Stripe payment form with the clientSecret
       setClientSecret(data.clientSecret);
     } catch {
       addToast("error", "Checkout failed. Please try again.");
@@ -173,8 +198,6 @@ export default function Home() {
     const pollInterval = setInterval(() => {
       story.refresh();
     }, 2000);
-
-    // Stop polling after 15 seconds
     setTimeout(() => clearInterval(pollInterval), 15000);
   }, [cart, addToast, story]);
 
@@ -191,21 +214,29 @@ export default function Home() {
     setClientSecret(null);
   }, []);
 
+  // ── Batch remove cart actions (for select + trash) ──
+  const handleRemoveActions = useCallback(
+    (indices: number[]) => {
+      cart.removeActions(indices);
+    },
+    [cart]
+  );
+
   return (
     <div className="min-h-screen flex flex-col">
-      <Header cartTotal={cart.total} />
+      <Header activeMode={activeMode} />
 
-      <div className="flex flex-1">
-        <Sidebar />
-        <StoryView
-          words={story.words}
-          wordCount={story.wordCount}
-          loading={story.loading}
-          interactionMode={activeMode === "write" ? null : activeMode}
-          selectedWords={selectedWords}
-          onWordClick={handleWordClick}
-        />
-      </div>
+      {/* Sidebar is fixed-positioned overlay — does not affect layout */}
+      <Sidebar />
+
+      <StoryView
+        words={story.words}
+        wordCount={story.wordCount}
+        loading={story.loading}
+        interactionMode={activeMode === "write" ? null : activeMode}
+        selectedWords={selectedWords}
+        onWordClick={handleWordClick}
+      />
 
       <Toolbar
         activeMode={activeMode}
@@ -221,7 +252,7 @@ export default function Home() {
         total={cart.total}
         meetsMinimum={cart.meetsMinimum}
         onClose={() => setCartOpen(false)}
-        onRemoveAction={cart.removeAction}
+        onRemoveActions={handleRemoveActions}
         onCheckout={handleCheckout}
         isCheckingOut={isCheckingOut}
         clientSecret={clientSecret}

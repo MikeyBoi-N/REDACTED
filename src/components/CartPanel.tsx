@@ -1,9 +1,11 @@
 /**
  * CartPanel component — slide-out cart review panel with integrated Stripe payment.
  *
- * Two states:
- *   1. Cart review: shows pending actions, total, and "Proceed to Pay" button
- *   2. Payment form: shows Stripe Elements card input after PaymentIntent is created
+ * Features:
+ *   - Checkbox selection on each item
+ *   - "Select All" toggle
+ *   - Trash icon to bulk-delete selected items
+ *   - Two states: cart review → payment form (after PaymentIntent created)
  *
  * Inputs: Cart actions, payment state, handlers
  * Outputs: Rendered cart panel overlay
@@ -12,6 +14,7 @@
 
 "use client";
 
+import { useState, useCallback } from "react";
 import { CartAction, CartActionType, PRICING } from "@/lib/types";
 import PaymentForm from "./PaymentForm";
 
@@ -21,7 +24,7 @@ interface CartPanelProps {
   readonly total: number;
   readonly meetsMinimum: boolean;
   readonly onClose: () => void;
-  readonly onRemoveAction: (index: number) => void;
+  readonly onRemoveActions: (indices: number[]) => void;
   readonly onCheckout: () => void;
   readonly isCheckingOut: boolean;
   readonly clientSecret: string | null;
@@ -56,7 +59,7 @@ export default function CartPanel({
   total,
   meetsMinimum,
   onClose,
-  onRemoveAction,
+  onRemoveActions,
   onCheckout,
   isCheckingOut,
   clientSecret,
@@ -64,9 +67,42 @@ export default function CartPanel({
   onPaymentError,
   onPaymentCancel,
 }: CartPanelProps) {
-  if (!isOpen) return null;
+  const [selected, setSelected] = useState<Set<number>>(new Set());
 
   const showPaymentForm = clientSecret !== null;
+
+  const toggleItem = useCallback((index: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    setSelected((prev) => {
+      if (prev.size === actions.length) {
+        return new Set();
+      }
+      return new Set(actions.map((_, i) => i));
+    });
+  }, [actions]);
+
+  const handleDeleteSelected = useCallback(() => {
+    if (selected.size === 0) return;
+    // Sort descending so removing doesn't shift indices
+    const indices = Array.from(selected).sort((a, b) => b - a);
+    onRemoveActions(indices);
+    setSelected(new Set());
+  }, [selected, onRemoveActions]);
+
+  if (!isOpen) return null;
+
+  const allSelected = actions.length > 0 && selected.size === actions.length;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -83,14 +119,41 @@ export default function CartPanel({
           <h2 className="text-white font-medium">
             {showPaymentForm ? "Complete Payment" : "Your Edits"}
           </h2>
-          {!showPaymentForm && (
-            <button
-              onClick={onClose}
-              className="text-neutral-500 hover:text-white text-lg"
-            >
-              ✕
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {!showPaymentForm && actions.length > 0 && (
+              <>
+                {/* Select All checkbox */}
+                <button
+                  onClick={toggleSelectAll}
+                  className="text-neutral-500 hover:text-white text-xs px-1.5 py-0.5 rounded border border-neutral-700 hover:border-neutral-500 transition-colors"
+                  title={allSelected ? "Deselect all" : "Select all"}
+                >
+                  {allSelected ? "☑ All" : "☐ All"}
+                </button>
+                {/* Trash button — visible when items are selected */}
+                {selected.size > 0 && (
+                  <button
+                    onClick={handleDeleteSelected}
+                    className="text-red-400 hover:text-red-300 p-1 rounded hover:bg-red-950/50 transition-colors"
+                    title={`Remove ${selected.size} item(s)`}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                  </button>
+                )}
+              </>
+            )}
+            {!showPaymentForm && (
+              <button
+                onClick={onClose}
+                className="text-neutral-500 hover:text-white text-lg"
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
 
         {showPaymentForm ? (
@@ -144,8 +207,19 @@ export default function CartPanel({
                 actions.map((action, index) => (
                   <div
                     key={index}
-                    className="flex items-center justify-between gap-2 px-3 py-2 bg-neutral-900 rounded border border-neutral-800"
+                    className={`flex items-center gap-2 px-3 py-2 rounded border transition-colors ${
+                      selected.has(index)
+                        ? "bg-neutral-800 border-neutral-600"
+                        : "bg-neutral-900 border-neutral-800"
+                    }`}
                   >
+                    {/* Checkbox */}
+                    <button
+                      onClick={() => toggleItem(index)}
+                      className="text-neutral-500 hover:text-white shrink-0"
+                    >
+                      {selected.has(index) ? "☑" : "☐"}
+                    </button>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-neutral-300 truncate">
                         {actionLabel(action)}
@@ -154,12 +228,6 @@ export default function CartPanel({
                     <span className="text-xs text-neutral-500 shrink-0">
                       {actionPrice(action)}
                     </span>
-                    <button
-                      onClick={() => onRemoveAction(index)}
-                      className="text-neutral-600 hover:text-red-400 text-xs shrink-0"
-                    >
-                      ✕
-                    </button>
                   </div>
                 ))
               )}

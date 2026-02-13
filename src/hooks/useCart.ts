@@ -85,6 +85,17 @@ export function useCart() {
     setActions((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  /** Removes all actions targeting a specific word ID (for toggle-deselection). */
+  const removeActionByWordId = useCallback((wordId: string) => {
+    setActions((prev) => prev.filter((a) => a.wordId !== wordId));
+  }, []);
+
+  /** Removes multiple actions by their indices (for batch cart deletion). */
+  const removeActions = useCallback((indices: number[]) => {
+    const indexSet = new Set(indices);
+    setActions((prev) => prev.filter((_, i) => !indexSet.has(i)));
+  }, []);
+
   /** Clears the entire cart. */
   const clearCart = useCallback(() => {
     setActions([]);
@@ -99,6 +110,8 @@ export function useCart() {
     addRedact,
     addUncover,
     removeAction,
+    removeActionByWordId,
+    removeActions,
     clearCart,
   };
 }

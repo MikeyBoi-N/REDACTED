@@ -38,6 +38,17 @@ export async function POST(request: NextRequest) {
     // Verify webhook signature
     const event = constructWebhookEvent(rawBody, signature);
 
+    if (event.type === "payment_intent.canceled") {
+      // Mark cancelled checkouts as failed
+      const cancelledIntent = event.data.object;
+      await query(
+        `UPDATE checkouts SET status = 'failed', completed_at = NOW()
+         WHERE stripe_payment_intent_id = $1 AND status = 'pending'`,
+        [cancelledIntent.id]
+      );
+      return NextResponse.json({ received: true });
+    }
+
     if (event.type !== "payment_intent.succeeded") {
       // Acknowledge but ignore other event types
       return NextResponse.json({ received: true });

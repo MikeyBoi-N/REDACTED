@@ -1,6 +1,7 @@
 /**
  * Toolbar component — bottom floating action bar.
- * Write (Aa), Redact (pen), Uncover (eye), Flag (flag) buttons.
+ * Write button is wide and highlighted for discoverability.
+ * Redact (pen), Uncover (eye), Flag (flag) are compact icon buttons.
  *
  * Inputs: Active mode, mode change handler, onWriteSubmit
  * Outputs: Rendered floating toolbar
@@ -88,19 +89,22 @@ export default function Toolbar({
 
       {/* Action buttons */}
       <div className="flex items-center gap-1 px-3 py-2 bg-neutral-900 rounded-xl border border-neutral-800 shadow-2xl">
-        {/* Write */}
+        {/* Write — wide prominent button */}
         <button
           id="toolbar-write"
           onClick={() => toggleMode("write")}
-          className={`flex items-center justify-center w-10 h-10 rounded-lg transition-colors text-lg ${
+          className={`flex items-center justify-center gap-2 px-5 h-10 rounded-lg transition-colors text-sm font-medium ${
             activeMode === "write"
               ? "bg-amber-700 text-white"
-              : "text-neutral-400 hover:bg-neutral-800 hover:text-white"
+              : "bg-amber-900/30 text-amber-400 hover:bg-amber-800/40 hover:text-amber-300 border border-amber-800/40"
           }`}
           title="Write a word ($1)"
         >
-          Aa
+          <span className="hidden sm:inline">Submit a word</span>
         </button>
+
+        {/* Divider */}
+        <div className="w-px h-6 bg-neutral-700 mx-1" />
 
         {/* Redact */}
         <button
