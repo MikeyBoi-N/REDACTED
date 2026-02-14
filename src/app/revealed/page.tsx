@@ -59,18 +59,17 @@ function SignalWordCell({ signal, now }: { signal: SignalData; now: Date }) {
     );
   }
 
-  // Redacted: red countdown + black bar
-  const barWidth = Math.max(signal.charCount, 4);
-
+  // Redacted: red countdown overlaid on black bar
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-red-500 text-sm font-mono font-bold select-none whitespace-nowrap">
-        {formatCountdown(remaining)}
-      </span>
+    <div className="flex items-center justify-center">
       <div
-        className="bg-black rounded-sm shrink-0"
-        style={{ width: `${barWidth * 0.6}ch`, height: "1.2em" }}
-      />
+        className="relative inline-flex items-center justify-center bg-black rounded-sm px-3"
+        style={{ minWidth: "10ch", height: "2em" }}
+      >
+        <span className="text-red-500 text-sm font-mono font-bold select-none whitespace-nowrap">
+          {formatCountdown(remaining)}
+        </span>
+      </div>
     </div>
   );
 }
