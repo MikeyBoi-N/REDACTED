@@ -133,9 +133,9 @@ const Word = memo(function Word({
 
     return (
       <span
-        className={`inline relative ${
+        className={`inline relative px-0.5 rounded ${
           isClickable ? "cursor-pointer" : ""
-        } ${isSelected ? "bg-blue-900/30 ring-1 ring-blue-500 rounded px-0.5" : ""}`}
+        } ${isSelected ? "bg-blue-900/30 ring-1 ring-blue-500" : ""}`}
         onClick={() => isClickable && onWordClick(word.id)}
         role={isClickable ? "button" : undefined}
       >
@@ -159,9 +159,9 @@ const Word = memo(function Word({
 
   return (
     <span
-      className={`inline ${
-        isClickable ? "cursor-pointer hover:bg-amber-900/20 rounded px-0.5" : ""
-      } ${isSelected ? "bg-blue-900/30 ring-1 ring-blue-500 rounded px-0.5" : ""}`}
+      className={`inline px-0.5 rounded transition-colors ${
+        isClickable ? "cursor-pointer hover:bg-amber-900/20" : ""
+      } ${isSelected ? "bg-blue-900/30 ring-1 ring-blue-500" : ""}`}
       onClick={() => isClickable && onWordClick(word.id)}
       role={isClickable ? "button" : undefined}
     >

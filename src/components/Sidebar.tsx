@@ -117,6 +117,11 @@ export default function Sidebar() {
               Free to flag a word you don&apos;t like. Enough flags reduce its
               visibility
             </li>
+            <li className="pt-2">
+              <a href="/stats" className="text-amber-500 hover:text-amber-400 transition-colors font-mono uppercase text-[10px] tracking-wider">
+                [ VIEW STATS ]
+              </a>
+            </li>
           </ul>
         </SidebarBox>
       </div>

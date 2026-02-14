@@ -1,5 +1,5 @@
 /**
- * Header component — top bar with interactive [ REDACTED ] logo and cart.
+ * Header component - top bar with interactive [ REDACTED ] logo and cart.
  *
  * - Click logo: cycles through cryptic project descriptions (positioned like sidebar)
  * - Easter egg: in "uncover" mode, clicking the logo shows morse code for "REVEALED"
@@ -13,7 +13,8 @@
 
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { FIRST_REVEAL_DATE, FINAL_REVEAL_DATE } from "@/lib/signalWords";
 
 /** Cryptic, slightly poetic descriptions that cycle on each click. */
 const CRYPTIC_MESSAGES = [
@@ -22,15 +23,15 @@ const CRYPTIC_MESSAGES = [
   "The first word was free. Nothing since has been.",
   "Somewhere between graffiti and gospel, this is what we chose to say.",
   "This page is a mirror. Don't blame the glass.",
-  "One dollar. One word. One chance to be permanent — or redacted.",
+  "One dollar. One word. One chance to be permanent - or redacted.",
   "The story doesn't care about your intentions. Only your dollar.",
 ] as const;
 
-/** Morse code for "REVEALED" — the easter egg reveal. */
+/** Morse code for "REVEALED" - the easter egg reveal. */
 const MORSE_REDACTED = ".-. . ...- . .- .-.. . -..";
 
 /**
- * Time-based subtitle phrases — indexed by the last digit of the current minute.
+ * Time-based subtitle phrases - indexed by the last digit of the current minute.
  * Minute ending in 0 → index 0, ending in 1 → index 1, etc.
  */
 const SUBTITLE_PHRASES = [
@@ -39,7 +40,7 @@ const SUBTITLE_PHRASES = [
   "Censorship can't stay hidden forever.",
   "The pen costs a dollar. The eraser costs two.",
   "Democracy of ink and coin.",
-  "Your word against theirs — literally.",
+  "Your word against theirs. literally.",
   "What would you write if no one could stop you?",
   "Every redaction is someone else's opinion.",
   "The story writes itself. You just fund it.",
@@ -47,7 +48,7 @@ const SUBTITLE_PHRASES = [
 ] as const;
 
 /** Midnight window (00:00–00:09) cryptic message. */
-const MIDNIGHT_MESSAGE = "//SIGNAL LOST — REASSEMBLING — DO NOT LOOK AWAY//";
+const MIDNIGHT_MESSAGE = "//SIGNAL LOST - REASSEMBLING - LOOK AWAY//";
 
 /** Returns subtitle based on current time. */
 function getSubtitle(): string {
@@ -85,6 +86,16 @@ export default function Header({ activeMode, cartItemCount, onCartOpen }: Header
     return () => clearInterval(interval);
   }, []);
 
+  // Progress: fraction of time elapsed from first signal word to last
+  const progress = useMemo(() => {
+    const start = new Date(FIRST_REVEAL_DATE).getTime();
+    const end = new Date(FINAL_REVEAL_DATE).getTime();
+    const nowMs = Date.now();
+    if (nowMs <= start) return 0;
+    if (nowMs >= end) return 100;
+    return ((nowMs - start) / (end - start)) * 100;
+  }, [subtitle]); // re-calc every minute when subtitle refreshes
+
   const handleHeaderClick = useCallback(() => {
     // Easter egg: in uncover mode, swap header text to morse code
     if (activeMode === "uncover") {
@@ -108,7 +119,8 @@ export default function Header({ activeMode, cartItemCount, onCartOpen }: Header
 
   return (
     <>
-      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-3 bg-neutral-950 border-b border-neutral-800">
+      <header className="fixed top-0 left-0 right-0 z-50 bg-neutral-950 border-b border-neutral-800">
+        <div className="flex items-center justify-between px-6 py-3">
         {/* Logo + subtitle */}
         <div className="flex items-center gap-6">
           <h1
@@ -124,7 +136,7 @@ export default function Header({ activeMode, cartItemCount, onCartOpen }: Header
           )}
         </div>
 
-        {/* Cart icon — top right */}
+        {/* Cart icon - top right */}
         <button
           onClick={onCartOpen}
           className="relative flex items-center justify-center w-9 h-9 rounded-lg text-neutral-400 hover:bg-neutral-800 hover:text-white transition-colors"
@@ -140,9 +152,17 @@ export default function Header({ activeMode, cartItemCount, onCartOpen }: Header
             </span>
           )}
         </button>
+        </div>
+        {/* Signal word global progress bar */}
+        <div className="h-[2px] w-full bg-neutral-900">
+          <div
+            className="h-full bg-amber-800/60 transition-all duration-1000"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
       </header>
 
-      {/* Cycling popup — positioned like sidebar boxes (fixed, left side) */}
+      {/* Cycling popup - positioned like sidebar boxes (fixed, left side) */}
       {popupIndex !== null && (
         <div className="fixed left-4 top-20 z-40 w-56 pointer-events-auto animate-slide-in">
           <div className="relative p-3 bg-neutral-900/95 backdrop-blur rounded border border-amber-900/40 shadow-2xl text-neutral-400 text-xs leading-relaxed">

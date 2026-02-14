@@ -196,8 +196,8 @@ export async function uncoverWord(wordId: string): Promise<boolean> {
   );
 
   if (!word) return false;
-  // Regular users can only uncover user-redacted words, NOT admin-locked ones
-  if (word.status !== WordStatus.Redacted) return false;
+  // Users can uncover redacted or flagged words (NOT admin-locked ones)
+  if (word.status !== WordStatus.Redacted && word.status !== WordStatus.Flagged) return false;
 
   await query(
     `UPDATE words SET status = $1, flag_count = 0 WHERE id = $2`,

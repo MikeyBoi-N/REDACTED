@@ -30,6 +30,11 @@ export default function StoryView({
   selectedWords,
   onWordClick,
 }: StoryViewProps) {
+  const redactedCount = words.filter(
+    (w) => w.status === WordStatus.Redacted || w.status === WordStatus.AdminRedacted
+  ).length;
+  const percentage = wordCount > 0 ? Math.round((redactedCount / wordCount) * 100) : 0;
+
   return (
     <div className="flex-1 flex justify-center min-h-0 pt-16 pb-24 px-4 md:px-8">
       {/* Story document — parchment paper look, always centered */}
@@ -82,8 +87,13 @@ export default function StoryView({
       </div>
 
       {/* Word count — bottom right */}
-      <div className="fixed bottom-4 right-6 text-neutral-500 text-sm font-mono z-40">
-        {wordCount} words
+      <div className="fixed bottom-4 right-6 text-neutral-500 text-xs sm:text-sm font-mono z-40 text-right">
+        <div>{wordCount} words</div>
+        {redactedCount > 0 && (
+          <div className="text-neutral-600 mt-0.5">
+            {redactedCount} redacted ({percentage}%)
+          </div>
+        )}
       </div>
     </div>
   );
